@@ -173,6 +173,7 @@ export function ProjectEditorClient({
       if (!element) return;
       
       // Dynamic import to avoid SSR issues
+      // @ts-ignore
       const html2pdf = (await import("html2pdf.js")).default;
       
       const opt = {
