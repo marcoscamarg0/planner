@@ -58,7 +58,7 @@ export function getPriorityColor(priority: string): string {
   return colors[priority] ?? "text-muted-foreground";
 }
 
-export function debounce<T extends (...args: unknown[]) => unknown>(
+export function debounce<T extends (...args: any[]) => any>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => void {
