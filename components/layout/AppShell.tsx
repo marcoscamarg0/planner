@@ -36,7 +36,7 @@ export function AppShell({ profile, projects, children }: AppShellProps) {
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar profile={profile} onOpenChat={() => setChatOpen(true)} />
+        <Topbar profile={profile} onOpenChat={() => setChatOpen(true)} projects={projectList} />
         <main
           id="main-content"
           className="flex-1 overflow-y-auto pb-20 md:pb-0"

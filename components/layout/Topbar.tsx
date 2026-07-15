@@ -8,12 +8,13 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { MagicAddModal } from "@/components/dashboard/MagicAddModal";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import type { Profile } from "@/types";
+import type { Profile, Project } from "@/types";
 
 interface TopbarProps {
   profile: Profile | null;
   title?: string;
   onOpenChat?: () => void;
+  projects?: Project[];
 }
 
 interface Notification {
@@ -24,7 +25,7 @@ interface Notification {
   projects: { id: string; title: string; color: string };
 }
 
-export function Topbar({ profile, title, onOpenChat }: TopbarProps) {
+export function Topbar({ profile, title, onOpenChat, projects = [] }: TopbarProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [magicOpen, setMagicOpen] = useState(false);
@@ -242,7 +243,7 @@ export function Topbar({ profile, title, onOpenChat }: TopbarProps) {
           </AnimatePresence>
         </div>
       </div>
-      <MagicAddModal open={magicOpen} onClose={() => setMagicOpen(false)} />
+      <MagicAddModal open={magicOpen} onClose={() => setMagicOpen(false)} projects={projects} />
     </header>
   );
 }

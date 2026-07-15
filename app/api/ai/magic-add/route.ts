@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { tasks, note } = parsed;
-    const results = { tasksCreated: 0, pageCreated: false };
+    const results = { tasksCreated: 0, pageCreated: false, summary: note ?? null };
 
     // Insert Note as a new Page if it exists
     let newPageId = null;
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
         .from("pages")
         .insert({
           project_id: projectId,
-          title: "Nota Rápida (Magic Add)",
+          title: "Resumo — Colado do Teams (Magic Add)",
           content: {
             type: "doc",
             content: [
@@ -69,6 +69,15 @@ export async function POST(request: NextRequest) {
         newPageId = pageData.id;
         results.pageCreated = true;
       }
+
+      // Also register as an executive summary insight so it shows up
+      // in the project's insights panel (dashboard, project page, report).
+      await supabase.from("ai_insights").insert({
+        project_id: projectId,
+        page_id: newPageId,
+        content: note,
+        type: "summary",
+      });
     }
 
     // Insert Tasks

@@ -80,11 +80,11 @@ export function buildMagicAddPrompt(text: string): OpenRouterMessage[] {
   return [
     {
       role: "system",
-      content: `${GOV_CONTEXT} Sua tarefa é ler anotações, despachos, emails ou atas de reunião e extrair estruturadamente: 1) Demandas/Tarefas (com título, prioridade inferida ['low', 'medium', 'high', 'urgent'] e prazo inferido no formato "YYYY-MM-DD" se mencionado, ou null); 2) Um registro/nota principal consolidando o assunto geral. Responda EXATAMENTE com um JSON válido: { "tasks": [{ "title": "string", "priority": "string", "due_date": "YYYY-MM-DD" | null }], "note": "string" | null }.`,
+      content: `${GOV_CONTEXT} O usuário vai colar uma mensagem bruta (do Microsoft Teams, e-mail, WhatsApp, ata de reunião etc.) e você deve estruturar isso para um projeto específico. Extraia: 1) Demandas/Tarefas acionáveis (com título, prioridade inferida ['low', 'medium', 'high', 'urgent'] e prazo inferido no formato "YYYY-MM-DD" se mencionado, ou null); 2) Um resumo executivo consolidando o assunto da mensagem em até 4 frases, direto ao ponto, destacando decisões, pendências e responsáveis se mencionados. Ignore saudações, assinaturas e ruído de conversa. Responda EXATAMENTE com um JSON válido: { "tasks": [{ "title": "string", "priority": "string", "due_date": "YYYY-MM-DD" | null }], "note": "string" | null }.`,
     },
     {
       role: "user",
-      content: `Extraia as demandas (com datas de vencimento se houver) e o resumo deste despacho:\n\n"${text}"\n\nRetorne apenas o JSON.`,
+      content: `Extraia as demandas (com datas de vencimento se houver) e o resumo executivo da seguinte mensagem colada:\n\n"${text}"\n\nRetorne apenas o JSON.`,
     },
   ];
 }

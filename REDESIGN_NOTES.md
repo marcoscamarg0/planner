@@ -55,3 +55,19 @@
 - OCR para PDFs escaneados (só extrai texto de PDFs com texto real).
 - Busca semântica/embeddings nas referências — hoje o conteúdo (truncado) vai
   inteiro no prompt, o que funciona bem até ~10-15 referências.
+
+## Atualização — "Colar do Teams" com escolha de projeto
+- `components/dashboard/MagicAddModal.tsx` (botão **✨ Magic Add** na Topbar,
+  disponível em todas as telas) agora tem um **seletor de projeto**.
+  - Com projeto selecionado → chama `/api/ai/magic-add`: a IA extrai
+    **tarefas** e um **resumo executivo** da mensagem colada (Teams, e-mail,
+    ata), cria as tarefas no projeto e salva o resumo como uma página +
+    um insight (`ai_insights`, tipo `summary`) — aparece automaticamente no
+    dashboard, no card do projeto e no relatório do projeto.
+  - Sem projeto selecionado → mantém o comportamento anterior (IA tenta
+    detectar o projeto/intenção sozinha via `/api/ai/command`).
+- Prompt (`buildMagicAddPrompt` em `lib/openrouter/prompts.ts`) ajustado para
+  lidar melhor com mensagens coladas de chat (ignora saudações/ruído, foca em
+  decisões, pendências e responsáveis).
+- Nenhuma migration nova é necessária para essa parte (usa tabelas já
+  existentes: `tasks`, `pages`, `ai_insights`).
