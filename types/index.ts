@@ -3,6 +3,7 @@ export type TaskStatus = "todo" | "in_progress" | "done" | "cancelled";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type ProjectRole = "owner" | "editor" | "viewer";
 export type InsightType = "summary" | "suggestion" | "alert" | "progress";
+export type KnowledgeSourceType = "link" | "pdf" | "text";
 
 export interface Profile {
   id: string;
@@ -85,6 +86,17 @@ export interface TaskGroupedByStatus {
   in_progress: Task[];
   done: Task[];
   cancelled: Task[];
+}
+
+export interface KnowledgeSource {
+  id: string;
+  owner_id: string;
+  project_id: string | null;
+  type: KnowledgeSourceType;
+  title: string;
+  source_url: string | null;
+  content: string;
+  created_at: string;
 }
 
 export interface DashboardStats {

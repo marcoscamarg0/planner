@@ -2,16 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, LogOut, User, ChevronDown, AlertCircle, Clock } from "lucide-react";
+import { Bell, LogOut, User, ChevronDown, AlertCircle, Clock, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { MagicAddModal } from "@/components/dashboard/MagicAddModal";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import type { Profile } from "@/types";
 
 interface TopbarProps {
   profile: Profile | null;
   title?: string;
+  onOpenChat?: () => void;
 }
 
 interface Notification {
@@ -22,7 +24,7 @@ interface Notification {
   projects: { id: string; title: string; color: string };
 }
 
-export function Topbar({ profile, title }: TopbarProps) {
+export function Topbar({ profile, title, onOpenChat }: TopbarProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [magicOpen, setMagicOpen] = useState(false);
@@ -70,13 +72,27 @@ export function Topbar({ profile, title }: TopbarProps) {
       )}
       {!title && <div />}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         <button
           onClick={() => setMagicOpen(true)}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 border border-indigo-500/20 text-xs font-semibold transition-all shadow-[0_0_15px_rgba(99,102,241,0.1)]"
+          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 text-xs font-semibold transition-all"
         >
           ✨ Magic Add
         </button>
+
+        {onOpenChat && (
+          <button
+            id="topbar-open-chat"
+            onClick={onOpenChat}
+            aria-label="Abrir Assistente IA"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 text-xs font-semibold transition-all shadow-sm"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Assistente IA</span>
+          </button>
+        )}
+
+        <ThemeToggle />
 
         <div className="relative">
           <button

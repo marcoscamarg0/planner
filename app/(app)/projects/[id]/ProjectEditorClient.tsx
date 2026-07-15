@@ -210,7 +210,7 @@ export function ProjectEditorClient({
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={handleExportPDF}
-                className="w-6 h-6 rounded flex items-center justify-center text-indigo-500 hover:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+                className="w-6 h-6 rounded flex items-center justify-center text-primary hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Exportar Relatório em PDF"
               >
                 <Download className="w-3.5 h-3.5" />

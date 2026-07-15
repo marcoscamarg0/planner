@@ -5,8 +5,6 @@ import { Topbar } from "@/components/layout/Topbar";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { AppShell } from "@/components/layout/AppShell";
 
-import { FloatingChat } from "@/components/chat/FloatingChat";
-
 export default async function AppLayout({
   children,
 }: {
@@ -42,7 +40,6 @@ export default async function AppLayout({
       projects={projects ?? []}
     >
       {children}
-      <FloatingChat />
     </AppShell>
   );
 }

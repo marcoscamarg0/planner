@@ -20,15 +20,24 @@ export async function POST(req: Request) {
     // Busca Contexto (RAG - Retrieval Augmented Generation)
     const [
       { data: projects },
-      { data: tasks }
+      { data: tasks },
+      { data: references }
     ] = await Promise.all([
       supabase.from("projects").select("id, title, status, description").eq("owner_id", user.id).neq("status", "archived").limit(10),
-      supabase.from("tasks").select("title, status, priority, due_date, project_id").neq("status", "done").order("due_date", { ascending: true }).limit(20)
+      supabase.from("tasks").select("title, status, priority, due_date, project_id").neq("status", "done").order("due_date", { ascending: true }).limit(20),
+      supabase.from("knowledge_sources").select("id, type, title, source_url, content").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(12)
     ]);
 
     const contextData = {
       projects: projects ?? [],
-      pending_tasks: tasks ?? []
+      pending_tasks: tasks ?? [],
+      // Referências anexadas pelo usuário (links, PDFs, textos) — conteúdo truncado por fonte
+      reference_sources: (references ?? []).map((r) => ({
+        title: r.title,
+        type: r.type,
+        source_url: r.source_url,
+        excerpt: (r.content || "").slice(0, 2500),
+      })),
     };
 
     const promptMessages = buildChatPrompt(messages, contextData);

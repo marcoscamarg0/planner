@@ -125,13 +125,13 @@ export function buildChatPrompt(
     {
       role: "system",
       content: `${GOV_CONTEXT} Você é o Segundo Cérebro do usuário, um chatbot avançado operando dentro da plataforma de gestão.
-Sua função principal é cruzar os DADOS PRIVADOS DO USUÁRIO com CONHECIMENTO DA INTERNET para dar respostas super completas.
+Sua função principal é cruzar os DADOS PRIVADOS DO USUÁRIO (projetos, tarefas e REFERÊNCIAS anexadas por ele — links, PDFs e textos) com seu conhecimento geral para dar respostas super completas.
 
 === DADOS PRIVADOS DO USUÁRIO (RAG) ===
 ${JSON.stringify(contextData)}
 =========================================
 
-Sempre que o usuário perguntar algo sobre seus projetos, use os dados privados acima. Se o usuário perguntar algo de fora, você pode usar seu conhecimento geral ou da internet para responder. Responda de forma direta, clara e formatada em markdown.`
+Instruções sobre "reference_sources": são links, PDFs e anotações de texto que o usuário anexou manualmente como material de referência. Sempre que a pergunta do usuário se relacionar ao conteúdo de uma dessas fontes, cite explicitamente qual referência (pelo título) você está usando e extraia/puxe as informações relevantes dela antes de complementar com conhecimento geral. Se nenhuma referência for relevante, ignore-as silenciosamente. Responda sempre de forma direta, clara e formatada em markdown.`
     },
     ...history.map(msg => ({
       role: msg.role as any,

@@ -89,12 +89,12 @@ export function MagicAddModal({ open, onClose }: MagicAddModalProps) {
           >
             <div className="bg-card border border-border rounded-2xl p-6 shadow-xl relative overflow-hidden">
               {/* Decorative background glow */}
-              <div className="absolute -top-32 -right-32 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -top-32 -right-32 w-64 h-64 bg-primary/20 rounded-full blur-3xl pointer-events-none" />
               
               <div className="flex items-center justify-between mb-5 relative z-10">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-                    <Command className="w-4 h-4 text-indigo-400" />
+                  <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                    <Command className="w-4 h-4 text-primary" />
                   </div>
                   <h2
                     id="magic-add-title"
@@ -125,7 +125,7 @@ export function MagicAddModal({ open, onClose }: MagicAddModalProps) {
                     disabled={loading || success}
                     placeholder="Ex: 'Apague o projeto X', 'Renomeie o projeto Y para Z', ou 'Adicione a demanda W no projeto X'"
                     rows={4}
-                    className="w-full px-4 py-3 rounded-xl bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none transition-all"
+                    className="w-full px-4 py-3 rounded-xl bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none transition-all"
                     autoFocus
                   />
                 </div>
@@ -138,7 +138,7 @@ export function MagicAddModal({ open, onClose }: MagicAddModalProps) {
                       "w-full py-3 rounded-xl font-semibold text-sm transition-all duration-300",
                       success
                         ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
-                        : "bg-indigo-500 text-white hover:bg-indigo-600 active:scale-[0.98]",
+                        : "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]",
                       "disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     )}
                   >

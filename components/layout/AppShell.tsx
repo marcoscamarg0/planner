@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NewProjectModal } from "@/components/dashboard/NewProjectModal";
+import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import type { Profile, Project } from "@/types";
 
 interface AppShellProps {
@@ -17,6 +18,7 @@ interface AppShellProps {
 export function AppShell({ profile, projects, children }: AppShellProps) {
   const [projectList, setProjectList] = useState<Project[]>(projects);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const router = useRouter();
 
   const handleProjectCreated = (project: Project) => {
@@ -34,7 +36,7 @@ export function AppShell({ profile, projects, children }: AppShellProps) {
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar profile={profile} />
+        <Topbar profile={profile} onOpenChat={() => setChatOpen(true)} />
         <main
           id="main-content"
           className="flex-1 overflow-y-auto pb-20 md:pb-0"
@@ -52,6 +54,8 @@ export function AppShell({ profile, projects, children }: AppShellProps) {
         onClose={() => setNewProjectOpen(false)}
         onCreated={handleProjectCreated}
       />
+
+      <ChatSidebar open={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   );
 }

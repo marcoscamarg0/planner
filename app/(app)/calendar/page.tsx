@@ -122,7 +122,7 @@ export default async function CalendarPage({
       {/* Upcoming List */}
       <div className="mt-8">
         <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-          <Clock className="w-5 h-5 text-indigo-400" /> 
+          <Clock className="w-5 h-5 text-primary" /> 
           Próximos Prazos (Visão em Lista)
         </h3>
         <div className="glass rounded-xl divide-y divide-border/50">
