@@ -2,6 +2,7 @@ import { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { DashboardClient } from "./DashboardClient";
+import type { Task } from "@/types";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -118,7 +119,7 @@ export default async function DashboardPage() {
     <DashboardClient
       profile={profile}
       projectsWithStats={projectsWithStats}
-      allTasks={tasks ?? []}
+      allTasks={(tasks as Task[]) ?? []}
       stats={stats}
     />
   );
