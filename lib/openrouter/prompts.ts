@@ -116,3 +116,26 @@ Aja com precisão cirúrgica na classificação da intenção.`,
     },
   ];
 }
+
+export function buildChatPrompt(
+  history: { role: string; content: string }[],
+  contextData: any
+): OpenRouterMessage[] {
+  return [
+    {
+      role: "system",
+      content: `${GOV_CONTEXT} Você é o Segundo Cérebro do usuário, um chatbot avançado operando dentro da plataforma de gestão.
+Sua função principal é cruzar os DADOS PRIVADOS DO USUÁRIO com CONHECIMENTO DA INTERNET para dar respostas super completas.
+
+=== DADOS PRIVADOS DO USUÁRIO (RAG) ===
+${JSON.stringify(contextData)}
+=========================================
+
+Sempre que o usuário perguntar algo sobre seus projetos, use os dados privados acima. Se o usuário perguntar algo de fora, você pode usar seu conhecimento geral ou da internet para responder. Responda de forma direta, clara e formatada em markdown.`
+    },
+    ...history.map(msg => ({
+      role: msg.role as any,
+      content: msg.content
+    }))
+  ];
+}

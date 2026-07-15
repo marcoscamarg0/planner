@@ -76,9 +76,9 @@ export default async function DashboardPage() {
     { data: insights }
   ] = projectIds.length > 0
     ? await Promise.all([
-        supabase.from("tasks").select("*").in("project_id", projectIds),
+        supabase.from("tasks").select("id, project_id, status").in("project_id", projectIds),
         supabase.from("pages").select("id, project_id").in("project_id", projectIds),
-        supabase.from("ai_insights").select("*").in("project_id", projectIds).order("created_at", { ascending: false }).limit(50)
+        supabase.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(50)
       ])
     : [{ data: [] }, { data: [] }, { data: [] }];
 

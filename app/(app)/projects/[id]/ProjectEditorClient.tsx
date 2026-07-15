@@ -13,6 +13,7 @@ import {
   Check,
   Clock,
   X,
+  Download,
 } from "lucide-react";
 import { BlockEditor } from "@/components/editor/BlockEditor";
 import { InsightBadge } from "@/components/dashboard/InsightBadge";
@@ -166,6 +167,29 @@ export function ProjectEditorClient({
     }
   };
 
+  const handleExportPDF = async () => {
+    try {
+      const element = document.getElementById("pdf-export-area");
+      if (!element) return;
+      
+      // Dynamic import to avoid SSR issues
+      const html2pdf = (await import("html2pdf.js")).default;
+      
+      const opt = {
+        margin: 10,
+        filename: `${project.title || 'relatorio'}-dashboard.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      
+      html2pdf().set(opt).from(element).save();
+    } catch (e) {
+      console.error("Erro ao gerar PDF:", e);
+      alert("Não foi possível gerar o PDF. Verifique o console.");
+    }
+  };
+
   const latestInsight = insights[0];
 
   return (
@@ -183,6 +207,13 @@ export function ProjectEditorClient({
               </h2>
             </div>
             <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={handleExportPDF}
+                className="w-6 h-6 rounded flex items-center justify-center text-indigo-500 hover:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+                title="Exportar Relatório em PDF"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
               <button
                 onClick={() => {
                   const newTitle = prompt("Novo nome do projeto:", project.title);
