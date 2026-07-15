@@ -30,7 +30,7 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
         total_tasks: 0,
         completed_tasks: 0,
         pages_count: 0,
-        last_insight: null,
+        last_insight: undefined,
       },
       ...prev,
     ]);
