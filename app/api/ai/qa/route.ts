@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const AVAILABLE_MODELS: Record<string, string> = {
-  "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct",
-  "gemini-flash": "google/gemini-flash-1.5",
-  "mistral-7b": "mistralai/mistral-7b-instruct",
-  "claude-haiku": "anthropic/claude-3-haiku",
-  "gpt-4o-mini": "openai/gpt-4o-mini",
+  "deepseek-v3": "deepseek/deepseek-chat-v3-0324:free",
+  "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
+  "mistral-7b": "mistralai/mistral-7b-instruct:free",
+  "gemma-3-27b": "google/gemma-3-27b-it:free",
+  "qwen-3-8b": "qwen/qwen3-8b:free",
 };
 
 async function callOpenRouter(
@@ -14,7 +14,7 @@ async function callOpenRouter(
   modelKey: string,
   apiKey: string
 ) {
-  const model = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["llama-3.1-8b"];
+  const model = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["deepseek-v3"];
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {

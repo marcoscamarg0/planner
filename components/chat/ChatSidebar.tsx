@@ -77,11 +77,11 @@ function InlineMarkdown({ text }: { text: string }) {
 
 
 const MODELS = [
+  { key: "deepseek-v3", label: "DeepSeek V3", provider: "DeepSeek" },
   { key: "llama-3.1-8b", label: "Llama 3.1 8B", provider: "Meta" },
-  { key: "gemini-flash", label: "Gemini Flash 1.5", provider: "Google" },
   { key: "mistral-7b", label: "Mistral 7B", provider: "Mistral" },
-  { key: "claude-haiku", label: "Claude 3 Haiku", provider: "Anthropic" },
-  { key: "gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI" },
+  { key: "gemma-3-27b", label: "Gemma 3 27B", provider: "Google" },
+  { key: "qwen-3-8b", label: "Qwen 3 8B", provider: "Alibaba" },
 ];
 
 interface ChatSidebarProps {

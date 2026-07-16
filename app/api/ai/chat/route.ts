@@ -2,6 +2,57 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildChatPrompt } from "@/lib/openrouter/prompts";
 
+// Apenas modelos 100% gratuitos no OpenRouter (sufixo :free)
+const MODEL_MAP: Record<string, string> = {
+  "deepseek-v3": "deepseek/deepseek-chat-v3-0324:free",
+  "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
+  "mistral-7b": "mistralai/mistral-7b-instruct:free",
+  "gemma-3-27b": "google/gemma-3-27b-it:free",
+  "qwen-3-8b": "qwen/qwen3-8b:free",
+};
+
+// Modelos que suportam tool calling confiavelmente
+const TOOL_CAPABLE_MODELS = new Set([
+  "deepseek/deepseek-chat-v3-0324:free",
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "mistralai/mistral-7b-instruct:free",
+]);
+
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "create_task",
+      description: "Cria uma nova demanda/tarefa em um projeto do usuario.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
+          title: { type: "string", description: "O titulo da tarefa" },
+          priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
+          description: { type: "string", description: "Observacoes ou detalhes da tarefa" }
+        },
+        required: ["project_id", "title"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_page",
+      description: "Cria um novo documento/pagina em um projeto do usuario.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
+          title: { type: "string", description: "O titulo da pagina" }
+        },
+        required: ["project_id", "title"]
+      }
+    }
+  }
+];
+
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
@@ -13,20 +64,11 @@ export async function POST(req: Request) {
 
     const { messages, model: modelKey } = await req.json();
 
-    // Modelos 100% gratuitos no OpenRouter (sufixo :free)
-    const MODEL_MAP: Record<string, string> = {
-      "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
-      "gemma-3-27b": "google/gemma-3-27b-it:free",
-      "mistral-7b": "mistralai/mistral-7b-instruct:free",
-      "deepseek-v3": "deepseek/deepseek-chat-v3-0324:free",
-      "qwen-3-8b": "qwen/qwen3-8b:free",
-    };
-
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: "Messages are required" }, { status: 400 });
     }
 
-    // Busca Contexto (RAG - Retrieval Augmented Generation)
+    // Busca Contexto (RAG)
     const [
       { data: projects },
       { data: tasks },
@@ -55,113 +97,35 @@ export async function POST(req: Request) {
       throw new Error("Missing OPENROUTER_API_KEY");
     }
 
-    // Seleciona o modelo: preferência do frontend > env > padrão gratuito
+    // Seleciona modelo: frontend > padrão gratuito (DeepSeek V3)
     const model = MODEL_MAP[modelKey] || MODEL_MAP["deepseek-v3"];
+    const supportsTools = TOOL_CAPABLE_MODELS.has(model);
 
-    // Modelos que suportam tool calling confiávelmente
-    const TOOL_CAPABLE_MODELS = [
-      "meta-llama/llama-3.1-8b-instruct:free",
-      "mistralai/mistral-7b-instruct:free",
-      "deepseek/deepseek-chat-v3-0324:free",
-    ];
-    const supportsTools = TOOL_CAPABLE_MODELS.includes(model);
-
-    const tools = [
-      {
-        type: "function",
-        function: {
-          name: "create_task",
-          description: "Cria uma nova demanda/tarefa em um projeto do usuário.",
-          parameters: {
-            type: "object",
-            properties: {
-              project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
-              title: { type: "string", description: "O título da tarefa" },
-              priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
-              description: { type: "string", description: "Observações ou detalhes da tarefa" }
-            },
-            required: ["project_id", "title"]
-          }
-        }
-      },
-      {
-        type: "function",
-        function: {
-          name: "create_page",
-          description: "Cria um novo documento/página em um projeto do usuário.",
-          parameters: {
-            type: "object",
-            properties: {
-              project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
-              title: { type: "string", description: "O título da página" }
-            },
-            required: ["project_id", "title"]
-          }
-        }
-      }
-    ];
-
-    const requestBody: any = {
-      model: model,
+    const requestBody: Record<string, unknown> = {
+      model,
       messages: promptMessages,
       temperature: 0.3,
     };
 
-    // Só envia tools se o modelo suportar confiávelmente
     if (supportsTools) {
-      requestBody.tools = tools;
+      requestBody.tools = TOOLS;
     }
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${openRouterApiKey}`,
+        "Authorization": "Bearer " + openRouterApiKey,
         "Content-Type": "application/json",
         "HTTP-Referer": "https://planner-j53e.onrender.com",
         "X-Title": "Planner AI",
       },
       body: JSON.stringify(requestBody),
     });
-          {
-            type: "function",
-            function: {
-              name: "create_task",
-              description: "Cria uma nova demanda/tarefa em um projeto do usuário.",
-              parameters: {
-                type: "object",
-                properties: {
-                  project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
-                  title: { type: "string", description: "O título da tarefa" },
-                  priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
-                  description: { type: "string", description: "Observações ou detalhes da tarefa" }
-                },
-                required: ["project_id", "title"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "create_page",
-              description: "Cria um novo documento/página em um projeto do usuário.",
-              parameters: {
-                type: "object",
-                properties: {
-                  project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
-                  title: { type: "string", description: "O título da página" }
-                },
-                required: ["project_id", "title"]
-              }
-            }
-          }
-        ]
-      }),
-    });
 
     if (!response.ok) {
       const err = await response.text();
       console.error("OpenRouter error:", err);
-      return NextResponse.json({ error: "Falha na IA" }, { status: 500 });
+      return NextResponse.json({ error: "Falha na IA: " + err }, { status: 500 });
     }
 
     const data = await response.json();
@@ -173,45 +137,34 @@ export async function POST(req: Request) {
         if (call.function.name === "create_task") {
           try {
             const args = JSON.parse(call.function.arguments);
-            const { error } = await supabase
-              .from("tasks")
-              .insert({
-                project_id: args.project_id,
-                title: args.title,
-                priority: args.priority || "medium",
-                description: args.description || null,
-                status: "todo",
-              });
-              
-            if (error) {
-              toolsFeedback += `Erro ao criar tarefa "${args.title}": ${error.message}\n`;
-            } else {
-              toolsFeedback += `✅ Tarefa **${args.title}** criada com sucesso!\n`;
-            }
+            const { error } = await supabase.from("tasks").insert({
+              project_id: args.project_id,
+              title: args.title,
+              priority: args.priority || "medium",
+              description: args.description || null,
+              status: "todo",
+            });
+            toolsFeedback += error
+              ? "Erro ao criar tarefa: " + error.message + "\n"
+              : "Tarefa **" + args.title + "** criada com sucesso!\n";
           } catch (e) {
-            toolsFeedback += `Erro ao processar criação da tarefa.\n`;
+            toolsFeedback += "Erro ao processar criacao da tarefa.\n";
           }
         } else if (call.function.name === "create_page") {
           try {
             const args = JSON.parse(call.function.arguments);
-            // Busca a contagem atual para order_index
-            const { count } = await supabase.from("pages").select("*", { count: 'exact', head: true }).eq("project_id", args.project_id);
-            const { error } = await supabase
-              .from("pages")
-              .insert({
-                project_id: args.project_id,
-                title: args.title,
-                content: null,
-                order_index: count || 0,
-              });
-              
-            if (error) {
-              toolsFeedback += `Erro ao criar página "${args.title}": ${error.message}\n`;
-            } else {
-              toolsFeedback += `📄 Página **${args.title}** criada com sucesso!\n`;
-            }
+            const { count } = await supabase.from("pages").select("*", { count: "exact", head: true }).eq("project_id", args.project_id);
+            const { error } = await supabase.from("pages").insert({
+              project_id: args.project_id,
+              title: args.title,
+              content: null,
+              order_index: count || 0,
+            });
+            toolsFeedback += error
+              ? "Erro ao criar pagina: " + error.message + "\n"
+              : "Pagina **" + args.title + "** criada com sucesso!\n";
           } catch (e) {
-            toolsFeedback += `Erro ao processar criação da página.\n`;
+            toolsFeedback += "Erro ao processar criacao da pagina.\n";
           }
         }
       }

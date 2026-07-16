@@ -19,11 +19,11 @@ import {
 import { cn } from "@/lib/utils";
 
 const MODELS = [
+  { key: "deepseek-v3", label: "DeepSeek V3", provider: "DeepSeek", badge: "Recomendado" },
   { key: "llama-3.1-8b", label: "Llama 3.1 8B", provider: "Meta", badge: "Rápido" },
-  { key: "gemini-flash", label: "Gemini Flash 1.5", provider: "Google", badge: "Respostas ricas" },
   { key: "mistral-7b", label: "Mistral 7B", provider: "Mistral", badge: "Código" },
-  { key: "claude-haiku", label: "Claude 3 Haiku", provider: "Anthropic", badge: "Preciso" },
-  { key: "gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI", badge: "Premium" },
+  { key: "gemma-3-27b", label: "Gemma 3 27B", provider: "Google", badge: "Texto longo" },
+  { key: "qwen-3-8b", label: "Qwen 3 8B", provider: "Alibaba", badge: "Multilingual" },
 ];
 
 const FRAMEWORKS = [
