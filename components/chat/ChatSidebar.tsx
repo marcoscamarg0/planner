@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Send, Bot, User, Loader2, MessageSquare, Library, Sparkles, ChevronDown } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ReferencesPanel } from "./ReferencesPanel";
 
@@ -90,6 +91,9 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
+  const searchParams = useSearchParams();
+  const activeTaskId = searchParams.get("taskId");
+
   const [tab, setTab] = useState<"chat" | "references">("chat");
   const [selectedModel, setSelectedModel] = useState("auto-free");
   const [showModelMenu, setShowModelMenu] = useState(false);
@@ -151,6 +155,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
             content: m.content,
           })),
           model: selectedModel,
+          activeTaskId,
         }),
       });
 

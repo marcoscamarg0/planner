@@ -17,8 +17,18 @@ function buildSystemPrompt(contextData: any): string {
   return `Você é o "Segundo Cérebro" — um assistente executivo de IA com CONTROLE TOTAL sobre a plataforma de gestão do usuário.
 
 === DADOS DO USUÁRIO ===
-${JSON.stringify(contextData, null, 0)}
+${JSON.stringify(contextData.global, null, 0)}
 ========================
+
+${contextData.activeTask ? `
+> [!IMPORTANT]
+> === CONTEXTO DA TAREFA ATIVA ===
+> O usuário ESTÁ com a seguinte tarefa ABERTA NA TELA neste exato momento:
+> ${JSON.stringify(contextData.activeTask, null, 2)}
+> 
+> Você pode ajudá-lo a detalhar o passo a passo, entender o que fazer ou quebrar a tarefa em subtarefas. Considere isso no seu contexto se ele pedir sugestões ou perguntar algo vago como "o que faço aqui?".
+> ========================
+` : ''}
 
 === SUAS CAPACIDADES DE AÇÃO ===
 Você pode realizar ações reais no sistema. Se o usuário pedir uma ação, você DEVE executá-la incluindo um bloco JSON no final da sua resposta, no formato exato:
@@ -143,7 +153,7 @@ export async function POST(req: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { messages, model: modelKey } = await req.json();
+    const { messages, model: modelKey, activeTaskId } = await req.json();
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: "Messages are required" }, { status: 400 });
     }
@@ -164,16 +174,29 @@ export async function POST(req: Request) {
       supabase.from("knowledge_sources").select("id, type, title, source_url, content").eq("owner_id", user.id).limit(10),
     ]);
 
+    let activeTaskDetails = null;
+    if (activeTaskId) {
+      const { data: activeTask } = await supabase.from("tasks").select("*").eq("id", activeTaskId).single();
+      if (activeTask) {
+        // Find subtasks
+        const { data: subtasks } = await supabase.from("tasks").select("id, title, status, priority").eq("parent_task_id", activeTaskId);
+        activeTaskDetails = { ...activeTask, subtasks };
+      }
+    }
+
     const contextData = {
-      projects: projects ?? [],
-      tasks: tasks ?? [],
-      pages: pages ?? [],
-      reference_sources: (references ?? []).map((r) => ({
-        title: r.title,
-        type: r.type,
-        source_url: r.source_url,
-        excerpt: (r.content || "").slice(0, 1500),
-      })),
+      global: {
+        projects: projects ?? [],
+        tasks: tasks ?? [],
+        pages: pages ?? [],
+        reference_sources: (references ?? []).map((r) => ({
+          title: r.title,
+          type: r.type,
+          source_url: r.source_url,
+          excerpt: (r.content || "").slice(0, 1500),
+        })),
+      },
+      activeTask: activeTaskDetails,
     };
 
     const model = MODEL_MAP[modelKey] || DEFAULT_MODEL;

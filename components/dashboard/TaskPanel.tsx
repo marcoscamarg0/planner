@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles } from "lucide-react";
+import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter, useSearchParams } from "next/navigation";
 import { cn, getPriorityColor, getPriorityLabel, getStatusLabel, formatDate } from "@/lib/utils";
 import type { Task, TaskStatus, TaskPriority } from "@/types";
+import { TaskDetailPane } from "./TaskDetailPane";
 
 interface TaskPanelProps {
   tasks: Task[];
@@ -28,50 +30,23 @@ const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
 };
 
 export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeTaskId = searchParams.get("taskId");
+
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "all">("all");
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [subtaskFormId, setSubtaskFormId] = useState<string | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
-  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
   const filteredTasks =
     filterStatus === "all"
       ? tasks
       : tasks.filter((t) => t.status === filterStatus);
 
-  const generateTaskPlan = async (taskId: string, taskTitle: string, currentDescription: string | null) => {
-    setLoadingPlanId(taskId);
-    try {
-      const res = await fetch("/api/ai/task-plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskTitle,
-          projectTitle: document.querySelector("h2")?.innerText || ""
-        }),
-      });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.plan) {
-          const newDesc = currentDescription 
-            ? currentDescription + "\n\n---\n**Plano de Ação (IA)**:\n" + data.plan 
-            : "**Plano de Ação (IA)**:\n" + data.plan;
-          
-          await updateDescription(taskId, newDesc);
-        }
-      } else {
-        alert("Falha ao gerar plano de ação.");
-      }
-    } catch (e) {
-      alert("Erro ao conectar com a IA.");
-    } finally {
-      setLoadingPlanId(null);
-    }
-  };
 
   const addSubtask = async (parentId: string, e: React.FormEvent) => {
     e.preventDefault();
@@ -180,7 +155,13 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden relative">
+      <TaskDetailPane
+        taskId={activeTaskId}
+        tasks={tasks}
+        onTasksChange={onTasksChange}
+        onClose={() => router.push(`?`)}
+      />
       <div className="px-6 py-4 border-b border-border flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-1 flex-wrap">
           {statusFilters.map((s) => (
@@ -286,38 +267,6 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                       >
                         {task.title}
                       </p>
-                      
-                      <AnimatePresence>
-                        {expandedTaskId === task.id && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="mt-2 overflow-hidden flex flex-col gap-2"
-                          >
-                            <textarea
-                              defaultValue={task.description || ""}
-                              onBlur={(e) => updateDescription(task.id, e.target.value)}
-                              placeholder="Adicionar observações detalhadas..."
-                              className="w-full text-xs bg-black/10 dark:bg-black/40 text-foreground placeholder:text-muted-foreground rounded-lg p-3 outline-none border border-border/50 resize-y min-h-[80px] focus:border-primary/50 transition-colors"
-                            />
-                            <div className="flex justify-end">
-                              <button
-                                onClick={() => generateTaskPlan(task.id, task.title, task.description)}
-                                disabled={loadingPlanId === task.id}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-[11px] font-medium hover:bg-primary/30 transition-colors disabled:opacity-50"
-                              >
-                                {loadingPlanId === task.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Sparkles className="w-3.5 h-3.5" />
-                                )}
-                                {loadingPlanId === task.id ? "Gerando..." : "Detalhar com IA"}
-                              </button>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
 
                       <div className="flex items-center gap-3 mt-2 flex-wrap">
                         <select
@@ -345,11 +294,11 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                         
                         <div className="flex items-center gap-2 ml-auto sm:ml-0">
                           <button
-                            onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                            onClick={() => router.push(`?taskId=${task.id}`)}
                             className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
-                            title="Observações"
+                            title="Abrir Detalhes"
                           >
-                            {task.description ? "📝" : "➕"} OBS
+                            <Maximize2 className="w-3 h-3" /> ABRIR
                           </button>
                           <button
                             onClick={() => setSubtaskFormId(subtaskFormId === task.id ? null : task.id)}
@@ -448,11 +397,11 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                                 
                                 <div className="flex items-center gap-2 ml-auto">
                                   <button
-                                    onClick={() => cancelTask(subtask.id)}
-                                    className="text-[10px] uppercase font-bold text-amber-500/70 hover:text-amber-500 transition-colors"
-                                    title="Cancelar Subtarefa"
+                                    onClick={() => router.push(`?taskId=${subtask.id}`)}
+                                    className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
+                                    title="Abrir Detalhes"
                                   >
-                                    CANCELAR
+                                    <Maximize2 className="w-3 h-3" /> ABRIR
                                   </button>
                                   <button
                                     onClick={() => deleteTask(subtask.id)}
