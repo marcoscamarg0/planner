@@ -24,11 +24,11 @@ export async function POST(req: Request) {
 
     const model = process.env.OPENROUTER_MODEL_CHAT || "meta-llama/llama-3.1-8b-instruct";
     
-    const sysPrompt = \`Você é um especialista em planejamento estratégico governamental. 
+    const sysPrompt = `Você é um especialista em planejamento estratégico governamental. 
 Seu objetivo é gerar um passo a passo detalhado e prático de como executar a tarefa solicitada. 
-Responda APENAS com o passo a passo em formato Markdown. Não adicione introduções ou conclusões desnecessárias. Seja direto, executivo e estruturado.\`;
+Responda APENAS com o passo a passo em formato Markdown. Não adicione introduções ou conclusões desnecessárias. Seja direto, executivo e estruturado.`;
 
-    const userPrompt = \`Projeto: \${projectTitle || 'Não especificado'}\nTarefa: \${taskTitle}\n\nEscreva um plano de ação detalhado (passo a passo) para executar esta demanda.\`;
+    const userPrompt = `Projeto: ${projectTitle || 'Não especificado'}\nTarefa: ${taskTitle}\n\nEscreva um plano de ação detalhado (passo a passo) para executar esta demanda.`;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
