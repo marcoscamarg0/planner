@@ -12,6 +12,70 @@ interface Message {
   content: string;
 }
 
+function MarkdownText({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.startsWith("### ")) {
+      elements.push(<h3 key={i} className="font-bold text-sm mt-3 mb-1 text-foreground">{line.slice(4)}</h3>);
+    } else if (line.startsWith("## ")) {
+      elements.push(<h2 key={i} className="font-bold text-base mt-3 mb-1 text-foreground">{line.slice(3)}</h2>);
+    } else if (line.startsWith("# ")) {
+      elements.push(<h1 key={i} className="font-bold text-lg mt-3 mb-1 text-foreground">{line.slice(2)}</h1>);
+    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      elements.push(
+        <li key={i} className="ml-4 list-disc text-sm leading-relaxed">
+          <InlineMarkdown text={line.slice(2)} />
+        </li>
+      );
+    } else if (/^\d+\.\s/.test(line)) {
+      const content = line.replace(/^\d+\.\s/, "");
+      elements.push(
+        <li key={i} className="ml-4 list-decimal text-sm leading-relaxed">
+          <InlineMarkdown text={content} />
+        </li>
+      );
+    } else if (line.startsWith("---") || line.startsWith("***")) {
+      elements.push(<hr key={i} className="my-2 border-border" />);
+    } else if (line.trim() === "") {
+      elements.push(<div key={i} className="h-2" />);
+    } else {
+      elements.push(
+        <p key={i} className="text-sm leading-relaxed">
+          <InlineMarkdown text={line} />
+        </p>
+      );
+    }
+    i++;
+  }
+
+  return <div className="space-y-0.5">{elements}</div>;
+}
+
+function InlineMarkdown({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+        } else if (part.startsWith("*") && part.endsWith("*")) {
+          return <em key={i}>{part.slice(1, -1)}</em>;
+        } else if (part.startsWith("`") && part.endsWith("`")) {
+          return <code key={i} className="bg-black/20 px-1 rounded text-xs font-mono">{part.slice(1, -1)}</code>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+
+
 interface ChatSidebarProps {
   open: boolean;
   onClose: () => void;
@@ -203,10 +267,14 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
                           "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
                           msg.role === "user"
                             ? "bg-primary text-primary-foreground rounded-tr-sm"
-                            : "bg-secondary/60 text-foreground border border-border rounded-tl-sm whitespace-pre-wrap"
+                            : "bg-secondary/60 text-foreground border border-border rounded-tl-sm"
                         )}
                       >
-                        {msg.content}
+                        {msg.role === "user" ? (
+                          msg.content
+                        ) : (
+                          <MarkdownText text={msg.content} />
+                        )}
                       </div>
                     </div>
                   ))}

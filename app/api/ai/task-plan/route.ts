@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { GOV_CONTEXT } from "@/lib/openrouter/prompts"; // wait, GOV_CONTEXT is not exported in prompts.ts. Let's redefine it here or just use a custom prompt.
 
 export async function POST(req: Request) {
   try {
@@ -23,17 +22,22 @@ export async function POST(req: Request) {
     }
 
     const model = process.env.OPENROUTER_MODEL_CHAT || "meta-llama/llama-3.1-8b-instruct";
-    
-    const sysPrompt = `Você é um especialista em planejamento estratégico governamental. 
-Seu objetivo é gerar um passo a passo detalhado e prático de como executar a tarefa solicitada. 
-Responda APENAS com o passo a passo em formato Markdown. Não adicione introduções ou conclusões desnecessárias. Seja direto, executivo e estruturado.`;
 
-    const userPrompt = `Projeto: ${projectTitle || 'Não especificado'}\nTarefa: ${taskTitle}\n\nEscreva um plano de ação detalhado (passo a passo) para executar esta demanda.`;
+    const sysPrompt =
+      "Voce e um especialista em planejamento estrategico governamental. " +
+      "Seu objetivo e gerar um passo a passo detalhado e pratico de como executar a tarefa solicitada. " +
+      "Responda APENAS com o passo a passo em formato Markdown. " +
+      "Nao adicione introducoes ou conclusoes desnecessarias. Seja direto, executivo e estruturado.";
+
+    const userPrompt =
+      "Projeto: " + (projectTitle || "Nao especificado") +
+      "\nTarefa: " + taskTitle +
+      "\n\nEscreva um plano de acao detalhado (passo a passo) para executar esta demanda.";
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": \`Bearer \${openRouterApiKey}\`,
+        "Authorization": "Bearer " + openRouterApiKey,
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:3000",
         "X-Title": "Governo AI Planner",
@@ -42,7 +46,7 @@ Responda APENAS com o passo a passo em formato Markdown. Não adicione introduç
         model: model,
         messages: [
           { role: "system", content: sysPrompt },
-          { role: "user", content: userPrompt }
+          { role: "user", content: userPrompt },
         ],
         temperature: 0.3,
       }),
@@ -55,7 +59,7 @@ Responda APENAS com o passo a passo em formato Markdown. Não adicione introduç
     }
 
     const data = await response.json();
-    const plan = data.choices[0]?.message?.content || "Não foi possível gerar o plano.";
+    const plan = data.choices[0]?.message?.content || "Nao foi possivel gerar o plano.";
 
     return NextResponse.json({ plan });
 
