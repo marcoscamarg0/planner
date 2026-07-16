@@ -47,17 +47,18 @@ export async function POST(req: Request) {
       const file = form.get("file");
       const providedTitle = (form.get("title") as string | null)?.trim();
 
-      if (!(file instanceof File)) {
+      if (!file || typeof file !== 'object' || !('arrayBuffer' in file)) {
         return NextResponse.json({ error: "Arquivo PDF ausente" }, { status: 400 });
       }
-      if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      const actualFile = file as File;
+      if (actualFile.type !== "application/pdf" && !actualFile.name.toLowerCase().endsWith(".pdf")) {
         return NextResponse.json({ error: "Apenas arquivos PDF são aceitos" }, { status: 400 });
       }
-      if (file.size > 15 * 1024 * 1024) {
+      if (actualFile.size > 15 * 1024 * 1024) {
         return NextResponse.json({ error: "PDF maior que 15MB" }, { status: 400 });
       }
 
-      const arrayBuffer = await file.arrayBuffer();
+      const arrayBuffer = await actualFile.arrayBuffer();
       const text = await extractFromPdfBuffer(Buffer.from(arrayBuffer));
 
       if (!text) {
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
         .insert({
           owner_id: user.id,
           type: "pdf",
-          title: providedTitle || file.name.replace(/\.pdf$/i, ""),
+          title: providedTitle || actualFile.name.replace(/\.pdf$/i, ""),
           source_url: null,
           content: text,
         })

@@ -261,7 +261,7 @@ export function ReferencesPanel() {
           </div>
         ) : (
           references.map((ref) => {
-            const meta = TYPE_META[ref.type];
+            const meta = TYPE_META[ref.type as KnowledgeSourceType] || TYPE_META.link;
             const Icon = meta.icon;
             return (
               <div

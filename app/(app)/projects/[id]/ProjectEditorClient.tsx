@@ -169,22 +169,7 @@ export function ProjectEditorClient({
 
   const handleExportPDF = async () => {
     try {
-      const element = document.getElementById("pdf-export-area");
-      if (!element) return;
-      
-      // Dynamic import to avoid SSR issues
-      // @ts-ignore
-      const html2pdf = (await import("html2pdf.js")).default;
-      
-      const opt = {
-        margin: 10,
-        filename: `${project.title || 'relatorio'}-dashboard.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-      
-      html2pdf().set(opt).from(element).save();
+      window.print();
     } catch (e) {
       console.error("Erro ao gerar PDF:", e);
       alert("Não foi possível gerar o PDF. Verifique o console.");
