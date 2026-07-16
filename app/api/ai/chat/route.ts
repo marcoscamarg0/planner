@@ -3,14 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 
 // Modelos 100% gratuitos no OpenRouter
 const MODEL_MAP: Record<string, string> = {
-  "deepseek-v3":  "deepseek/deepseek-chat-v3-0324:free",
-  "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
-  "mistral-7b":   "mistralai/mistral-7b-instruct:free",
-  "gemma-3-27b":  "google/gemma-3-27b-it:free",
-  "qwen-3-8b":    "qwen/qwen3-8b:free",
+  "auto-free": "openrouter/free",
+  "nemotron-70b": "nvidia/llama-3.1-nemotron-70b-instruct:free",
+  "qwen-coder": "qwen/qwen-2.5-coder-32b-instruct:free",
+  "laguna-xs": "poolside/laguna-xs-2.1:free",
+  "cohere-north": "cohere/north-mini-code:free",
 };
 
-const DEFAULT_MODEL = "deepseek/deepseek-chat-v3-0324:free";
+const DEFAULT_MODEL = "openrouter/free";
 
 // Prompt do sistema com ações embarcadas (funciona com qualquer modelo gratuito)
 function buildSystemPrompt(contextData: any): string {

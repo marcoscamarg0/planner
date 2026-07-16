@@ -19,11 +19,11 @@ import {
 import { cn } from "@/lib/utils";
 
 const MODELS = [
-  { key: "deepseek-v3", label: "DeepSeek V3", provider: "DeepSeek", badge: "Recomendado" },
-  { key: "llama-3.1-8b", label: "Llama 3.1 8B", provider: "Meta", badge: "Rápido" },
-  { key: "mistral-7b", label: "Mistral 7B", provider: "Mistral", badge: "Código" },
-  { key: "gemma-3-27b", label: "Gemma 3 27B", provider: "Google", badge: "Texto longo" },
-  { key: "qwen-3-8b", label: "Qwen 3 8B", provider: "Alibaba", badge: "Multilingual" },
+  { key: "auto-free", label: "Automático (Melhor Gratuito)", provider: "OpenRouter", badge: "Recomendado" },
+  { key: "nemotron-70b", label: "Nvidia Nemotron 70B", provider: "Nvidia", badge: "Avançado" },
+  { key: "qwen-coder", label: "Qwen 2.5 Coder", provider: "Alibaba", badge: "Programação" },
+  { key: "laguna-xs", label: "Laguna XS", provider: "Poolside", badge: "Rápido" },
+  { key: "cohere-north", label: "North Mini Code", provider: "Cohere", badge: "Análise" },
 ];
 
 const FRAMEWORKS = [

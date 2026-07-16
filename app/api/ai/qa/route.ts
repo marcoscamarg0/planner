@@ -2,19 +2,19 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const AVAILABLE_MODELS: Record<string, string> = {
-  "deepseek-v3": "deepseek/deepseek-chat-v3-0324:free",
-  "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
-  "mistral-7b": "mistralai/mistral-7b-instruct:free",
-  "gemma-3-27b": "google/gemma-3-27b-it:free",
-  "qwen-3-8b": "qwen/qwen3-8b:free",
+  "auto-free": "openrouter/free",
+  "nemotron-70b": "nvidia/llama-3.1-nemotron-70b-instruct:free",
+  "qwen-coder": "qwen/qwen-2.5-coder-32b-instruct:free",
+  "laguna-xs": "poolside/laguna-xs-2.1:free",
+  "cohere-north": "cohere/north-mini-code:free",
 };
 
 async function callOpenRouter(
-  messages: { role: string; content: string }[],
+  messages: any[],
   modelKey: string,
   apiKey: string
 ) {
-  const model = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["deepseek-v3"];
+  const model = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["auto-free"];
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
       throw new Error("Missing OPENROUTER_API_KEY");
     }
 
-    const model = process.env.OPENROUTER_MODEL_CHAT || "deepseek/deepseek-chat-v3-0324:free";
+    const model = process.env.OPENROUTER_MODEL_CHAT || "openrouter/free";
 
     const sysPrompt =
       "Voce e um especialista em planejamento estrategico governamental. " +
