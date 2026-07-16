@@ -13,12 +13,13 @@ export async function POST(req: Request) {
 
     const { messages, model: modelKey } = await req.json();
 
+    // Modelos 100% gratuitos no OpenRouter (sufixo :free)
     const MODEL_MAP: Record<string, string> = {
-      "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct",
-      "gemini-flash": "google/gemini-flash-1.5",
-      "mistral-7b": "mistralai/mistral-7b-instruct",
-      "claude-haiku": "anthropic/claude-3-haiku",
-      "gpt-4o-mini": "openai/gpt-4o-mini",
+      "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
+      "gemma-3-27b": "google/gemma-3-27b-it:free",
+      "mistral-7b": "mistralai/mistral-7b-instruct:free",
+      "deepseek-v3": "deepseek/deepseek-chat-v3-0324:free",
+      "qwen-3-8b": "qwen/qwen3-8b:free",
     };
 
     if (!messages || !Array.isArray(messages)) {
@@ -39,7 +40,6 @@ export async function POST(req: Request) {
     const contextData = {
       projects: projects ?? [],
       pending_tasks: tasks ?? [],
-      // Referências anexadas pelo usuário (links, PDFs, textos) — conteúdo truncado por fonte
       reference_sources: (references ?? []).map((r) => ({
         title: r.title,
         type: r.type,
@@ -55,22 +55,73 @@ export async function POST(req: Request) {
       throw new Error("Missing OPENROUTER_API_KEY");
     }
 
-    // Model: prefer the one sent from frontend, then env var, then default
-    const model = MODEL_MAP[modelKey] || process.env.OPENROUTER_MODEL_CHAT || "meta-llama/llama-3.1-8b-instruct";
+    // Seleciona o modelo: preferência do frontend > env > padrão gratuito
+    const model = MODEL_MAP[modelKey] || MODEL_MAP["deepseek-v3"];
+
+    // Modelos que suportam tool calling confiávelmente
+    const TOOL_CAPABLE_MODELS = [
+      "meta-llama/llama-3.1-8b-instruct:free",
+      "mistralai/mistral-7b-instruct:free",
+      "deepseek/deepseek-chat-v3-0324:free",
+    ];
+    const supportsTools = TOOL_CAPABLE_MODELS.includes(model);
+
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "create_task",
+          description: "Cria uma nova demanda/tarefa em um projeto do usuário.",
+          parameters: {
+            type: "object",
+            properties: {
+              project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
+              title: { type: "string", description: "O título da tarefa" },
+              priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
+              description: { type: "string", description: "Observações ou detalhes da tarefa" }
+            },
+            required: ["project_id", "title"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "create_page",
+          description: "Cria um novo documento/página em um projeto do usuário.",
+          parameters: {
+            type: "object",
+            properties: {
+              project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
+              title: { type: "string", description: "O título da página" }
+            },
+            required: ["project_id", "title"]
+          }
+        }
+      }
+    ];
+
+    const requestBody: any = {
+      model: model,
+      messages: promptMessages,
+      temperature: 0.3,
+    };
+
+    // Só envia tools se o modelo suportar confiávelmente
+    if (supportsTools) {
+      requestBody.tools = tools;
+    }
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${openRouterApiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "Governo AI Planner",
+        "HTTP-Referer": "https://planner-j53e.onrender.com",
+        "X-Title": "Planner AI",
       },
-      body: JSON.stringify({
-        model: model,
-        messages: promptMessages,
-        temperature: 0.3,
-        tools: [
+      body: JSON.stringify(requestBody),
+    });
           {
             type: "function",
             function: {
