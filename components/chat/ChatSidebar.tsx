@@ -91,7 +91,7 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   const [tab, setTab] = useState<"chat" | "references">("chat");
-  const [selectedModel, setSelectedModel] = useState("llama-3.1-8b");
+  const [selectedModel, setSelectedModel] = useState("deepseek-v3");
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -154,9 +154,11 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
         }),
       });
 
-      if (!response.ok) throw new Error("Erro na requisição");
-
       const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Erro na requisição: " + response.status);
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -166,13 +168,13 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
           content: data.reply || "Desculpe, não consegui formular uma resposta.",
         },
       ]);
-    } catch (error) {
+    } catch (error: any) {
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: "assistant",
-          content: "❌ Ocorreu um erro ao processar sua mensagem. Tente novamente.",
+          content: "❌ " + (error?.message || "Erro ao processar mensagem. Tente novamente."),
         },
       ]);
     } finally {

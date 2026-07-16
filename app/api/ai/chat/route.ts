@@ -1,184 +1,217 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { buildChatPrompt } from "@/lib/openrouter/prompts";
 
-// Apenas modelos 100% gratuitos no OpenRouter (sufixo :free)
+// Modelos 100% gratuitos no OpenRouter
 const MODEL_MAP: Record<string, string> = {
-  "deepseek-v3": "deepseek/deepseek-chat-v3-0324:free",
+  "deepseek-v3":  "deepseek/deepseek-chat-v3-0324:free",
   "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct:free",
-  "mistral-7b": "mistralai/mistral-7b-instruct:free",
-  "gemma-3-27b": "google/gemma-3-27b-it:free",
-  "qwen-3-8b": "qwen/qwen3-8b:free",
+  "mistral-7b":   "mistralai/mistral-7b-instruct:free",
+  "gemma-3-27b":  "google/gemma-3-27b-it:free",
+  "qwen-3-8b":    "qwen/qwen3-8b:free",
 };
 
-// Modelos que suportam tool calling confiavelmente
-const TOOL_CAPABLE_MODELS = new Set([
-  "deepseek/deepseek-chat-v3-0324:free",
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "mistralai/mistral-7b-instruct:free",
-]);
+const DEFAULT_MODEL = "deepseek/deepseek-chat-v3-0324:free";
 
-const TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "create_task",
-      description: "Cria uma nova demanda/tarefa em um projeto do usuario.",
-      parameters: {
-        type: "object",
-        properties: {
-          project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
-          title: { type: "string", description: "O titulo da tarefa" },
-          priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
-          description: { type: "string", description: "Observacoes ou detalhes da tarefa" }
-        },
-        required: ["project_id", "title"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "create_page",
-      description: "Cria um novo documento/pagina em um projeto do usuario.",
-      parameters: {
-        type: "object",
-        properties: {
-          project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
-          title: { type: "string", description: "O titulo da pagina" }
-        },
-        required: ["project_id", "title"]
-      }
-    }
+// Prompt do sistema com ações embarcadas (funciona com qualquer modelo gratuito)
+function buildSystemPrompt(contextData: any): string {
+  return `Você é o "Segundo Cérebro" — um assistente executivo de IA com CONTROLE TOTAL sobre a plataforma de gestão do usuário.
+
+=== DADOS DO USUÁRIO ===
+${JSON.stringify(contextData, null, 0)}
+========================
+
+=== SUAS CAPACIDADES DE AÇÃO ===
+Você pode realizar ações reais no sistema. Se o usuário pedir uma ação, você DEVE executá-la incluindo um bloco JSON no final da sua resposta, no formato exato:
+
+AÇÃO:{"action":"...", "params":{...}}
+
+Ações disponíveis:
+- create_task: params={project_id, title, priority("low"|"medium"|"high"|"urgent"), description}
+- update_task: params={task_id, fields:{status("todo"|"in_progress"|"done"|"cancelled"), priority, title, description}}
+- delete_task: params={task_id}
+- create_page: params={project_id, title}
+- update_page: params={page_id, title}
+- delete_page: params={page_id}
+- update_project: params={project_id, fields:{title, description, status("active"|"paused"|"completed"|"archived")}}
+
+Para MÚLTIPLAS ações, use múltiplos blocos:
+AÇÃO:{"action":"create_task", "params":{...}}
+AÇÃO:{"action":"create_task", "params":{...}}
+
+REGRAS CRÍTICAS:
+- Use os IDs EXATOS dos projetos/tarefas/páginas presentes nos dados acima
+- Se o usuário pedir "crie uma tarefa no projeto X", encontre o project_id correto nos dados
+- Se não tiver certeza do ID, pergunte ao usuário
+- NUNCA diga "não posso fazer isso" — você tem permissão total
+- Responda em português, de forma executiva e direta
+- Formate a resposta em Markdown (antes do bloco AÇÃO:)
+- O bloco AÇÃO: deve ser a ÚLTIMA coisa na sua resposta`;
+}
+
+async function callAI(messages: any[], model: string, apiKey: string) {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer " + apiKey,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://planner-j53e.onrender.com",
+      "X-Title": "Planner AI",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: 0.3,
+      max_tokens: 2000,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error("OpenRouter [" + response.status + "]: " + err);
   }
-];
+
+  const data = await response.json();
+  return data.choices[0]?.message?.content || "";
+}
+
+async function executeAction(action: string, params: any, supabase: any): Promise<string> {
+  try {
+    switch (action) {
+      case "create_task": {
+        const { error } = await supabase.from("tasks").insert({
+          project_id: params.project_id,
+          title: params.title,
+          priority: params.priority || "medium",
+          description: params.description || null,
+          status: "todo",
+        });
+        return error ? "❌ Erro ao criar tarefa: " + error.message : "✅ Tarefa **" + params.title + "** criada!";
+      }
+
+      case "update_task": {
+        const fields: any = { updated_at: new Date().toISOString() };
+        if (params.fields?.status) fields.status = params.fields.status;
+        if (params.fields?.priority) fields.priority = params.fields.priority;
+        if (params.fields?.title) fields.title = params.fields.title;
+        if (params.fields?.description !== undefined) fields.description = params.fields.description;
+        const { error } = await supabase.from("tasks").update(fields).eq("id", params.task_id);
+        return error ? "❌ Erro ao atualizar tarefa: " + error.message : "✅ Tarefa atualizada!";
+      }
+
+      case "delete_task": {
+        const { error } = await supabase.from("tasks").delete().eq("id", params.task_id);
+        return error ? "❌ Erro ao apagar tarefa: " + error.message : "🗑️ Tarefa apagada!";
+      }
+
+      case "create_page": {
+        const { count } = await supabase.from("pages").select("*", { count: "exact", head: true }).eq("project_id", params.project_id);
+        const { error } = await supabase.from("pages").insert({
+          project_id: params.project_id,
+          title: params.title,
+          content: null,
+          order_index: count || 0,
+        });
+        return error ? "❌ Erro ao criar página: " + error.message : "📄 Página **" + params.title + "** criada!";
+      }
+
+      case "update_page": {
+        const { error } = await supabase.from("pages").update({ title: params.title, updated_at: new Date().toISOString() }).eq("id", params.page_id);
+        return error ? "❌ Erro ao atualizar página: " + error.message : "✅ Página atualizada!";
+      }
+
+      case "delete_page": {
+        const { error } = await supabase.from("pages").delete().eq("id", params.page_id);
+        return error ? "❌ Erro ao apagar página: " + error.message : "🗑️ Página apagada!";
+      }
+
+      case "update_project": {
+        const { error } = await supabase.from("projects").update(params.fields).eq("id", params.project_id);
+        return error ? "❌ Erro ao atualizar projeto: " + error.message : "✅ Projeto atualizado!";
+      }
+
+      default:
+        return "⚠️ Ação desconhecida: " + action;
+    }
+  } catch (e: any) {
+    return "❌ Erro interno: " + e.message;
+  }
+}
 
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { messages, model: modelKey } = await req.json();
-
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: "Messages are required" }, { status: 400 });
     }
 
-    // Busca Contexto (RAG)
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
+
+    // Busca contexto completo do usuário
     const [
       { data: projects },
       { data: tasks },
+      { data: pages },
       { data: references }
     ] = await Promise.all([
-      supabase.from("projects").select("id, title, status, description").eq("owner_id", user.id).neq("status", "archived").limit(10),
-      supabase.from("tasks").select("title, status, priority, due_date, project_id").neq("status", "done").order("due_date", { ascending: true }).limit(20),
-      supabase.from("knowledge_sources").select("id, type, title, source_url, content").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(12)
+      supabase.from("projects").select("id, title, status, description").eq("owner_id", user.id).neq("status", "archived").limit(20),
+      supabase.from("tasks").select("id, title, status, priority, project_id, description").eq("status", "todo").limit(50),
+      supabase.from("pages").select("id, title, project_id").limit(50),
+      supabase.from("knowledge_sources").select("id, type, title, source_url, content").eq("owner_id", user.id).limit(10),
     ]);
 
     const contextData = {
       projects: projects ?? [],
-      pending_tasks: tasks ?? [],
+      tasks: tasks ?? [],
+      pages: pages ?? [],
       reference_sources: (references ?? []).map((r) => ({
         title: r.title,
         type: r.type,
         source_url: r.source_url,
-        excerpt: (r.content || "").slice(0, 2500),
+        excerpt: (r.content || "").slice(0, 1500),
       })),
     };
 
-    const promptMessages = buildChatPrompt(messages, contextData);
+    const model = MODEL_MAP[modelKey] || DEFAULT_MODEL;
 
-    const openRouterApiKey = process.env.OPENROUTER_API_KEY;
-    if (!openRouterApiKey) {
-      throw new Error("Missing OPENROUTER_API_KEY");
-    }
+    const promptMessages = [
+      { role: "system", content: buildSystemPrompt(contextData) },
+      ...messages.map((m: any) => ({ role: m.role, content: m.content })),
+    ];
 
-    // Seleciona modelo: frontend > padrão gratuito (DeepSeek V3)
-    const model = MODEL_MAP[modelKey] || MODEL_MAP["deepseek-v3"];
-    const supportsTools = TOOL_CAPABLE_MODELS.has(model);
+    const aiResponse = await callAI(promptMessages, model, apiKey);
 
-    const requestBody: Record<string, unknown> = {
-      model,
-      messages: promptMessages,
-      temperature: 0.3,
-    };
+    // Extrai e executa ações embarcadas na resposta
+    const actionRegex = /AÇÃO:\s*(\{.*?\})/g;
+    const actionResults: string[] = [];
+    let cleanResponse = aiResponse;
+    let match;
 
-    if (supportsTools) {
-      requestBody.tools = TOOLS;
-    }
-
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": "Bearer " + openRouterApiKey,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://planner-j53e.onrender.com",
-        "X-Title": "Planner AI",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error("OpenRouter error:", err);
-      return NextResponse.json({ error: "Falha na IA: " + err }, { status: 500 });
-    }
-
-    const data = await response.json();
-    const message = data.choices[0]?.message;
-
-    if (message?.tool_calls?.length > 0) {
-      let toolsFeedback = "";
-      for (const call of message.tool_calls) {
-        if (call.function.name === "create_task") {
-          try {
-            const args = JSON.parse(call.function.arguments);
-            const { error } = await supabase.from("tasks").insert({
-              project_id: args.project_id,
-              title: args.title,
-              priority: args.priority || "medium",
-              description: args.description || null,
-              status: "todo",
-            });
-            toolsFeedback += error
-              ? "Erro ao criar tarefa: " + error.message + "\n"
-              : "Tarefa **" + args.title + "** criada com sucesso!\n";
-          } catch (e) {
-            toolsFeedback += "Erro ao processar criacao da tarefa.\n";
-          }
-        } else if (call.function.name === "create_page") {
-          try {
-            const args = JSON.parse(call.function.arguments);
-            const { count } = await supabase.from("pages").select("*", { count: "exact", head: true }).eq("project_id", args.project_id);
-            const { error } = await supabase.from("pages").insert({
-              project_id: args.project_id,
-              title: args.title,
-              content: null,
-              order_index: count || 0,
-            });
-            toolsFeedback += error
-              ? "Erro ao criar pagina: " + error.message + "\n"
-              : "Pagina **" + args.title + "** criada com sucesso!\n";
-          } catch (e) {
-            toolsFeedback += "Erro ao processar criacao da pagina.\n";
-          }
-        }
+    while ((match = actionRegex.exec(aiResponse)) !== null) {
+      try {
+        const { action, params } = JSON.parse(match[1]);
+        const result = await executeAction(action, params, supabase);
+        actionResults.push(result);
+      } catch (e) {
+        actionResults.push("⚠️ Não foi possível processar a ação.");
       }
-      return NextResponse.json({ reply: toolsFeedback + (message.content ? "\n\n" + message.content : "") });
     }
 
-    const reply = message?.content || "Sem resposta.";
-    return NextResponse.json({ reply });
+    // Remove os blocos AÇÃO: da resposta final
+    cleanResponse = aiResponse.replace(/AÇÃO:\s*\{.*?\}/g, "").trim();
+
+    const finalReply = actionResults.length > 0
+      ? actionResults.join("\n") + (cleanResponse ? "\n\n" + cleanResponse : "")
+      : cleanResponse || "Sem resposta.";
+
+    return NextResponse.json({ reply: finalReply });
 
   } catch (error: any) {
     console.error("Chat Error:", error);
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }
 }
