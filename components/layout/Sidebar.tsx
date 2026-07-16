@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Plus,
   Calendar,
+  TestTube2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
@@ -35,6 +36,11 @@ const navItems = [
     href: "/calendar",
     label: "Calendário de Prazos",
     icon: Calendar,
+  },
+  {
+    href: "/qa",
+    label: "Qualidade & Testes",
+    icon: TestTube2,
   },
 ];
 

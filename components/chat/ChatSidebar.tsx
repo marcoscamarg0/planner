@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Bot, User, Loader2, MessageSquare, Library, Sparkles } from "lucide-react";
+import { X, Send, Bot, User, Loader2, MessageSquare, Library, Sparkles, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReferencesPanel } from "./ReferencesPanel";
 
@@ -83,6 +83,8 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   const [tab, setTab] = useState<"chat" | "references">("chat");
+  const [selectedModel, setSelectedModel] = useState("llama-3.1-8b");
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -140,6 +142,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
             role: m.role,
             content: m.content,
           })),
+          model: selectedModel,
         }),
       });
 
@@ -203,13 +206,49 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
                   <p className="text-xs text-muted-foreground">Assistente com contexto dos seus dados</p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                aria-label="Fechar assistente"
-                className="w-8 h-8 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowModelMenu(!showModelMenu)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-border hover:border-primary/40 transition-all text-muted-foreground hover:text-foreground"
+                  >
+                    <Sparkles className="w-3 h-3 text-primary" />
+                    {MODELS.find(m => m.key === selectedModel)?.label || "Modelo"}
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  <AnimatePresence>
+                    {showModelMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                        className="absolute right-0 mt-1 w-56 rounded-xl bg-card border border-border shadow-2xl z-50 overflow-hidden"
+                      >
+                        {MODELS.map(m => (
+                          <button
+                            key={m.key}
+                            onClick={() => { setSelectedModel(m.key); setShowModelMenu(false); }}
+                            className={cn(
+                              "w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors",
+                              selectedModel === m.key && "bg-primary/10 text-primary"
+                            )}
+                          >
+                            <span className="font-medium">{m.label}</span>
+                            <span className="text-muted-foreground">{m.provider}</span>
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <button
+                  onClick={onClose}
+                  aria-label="Fechar assistente"
+                  className="w-8 h-8 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Tabs */}

@@ -11,7 +11,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { messages } = await req.json();
+    const { messages, model: modelKey } = await req.json();
+
+    const MODEL_MAP: Record<string, string> = {
+      "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct",
+      "gemini-flash": "google/gemini-flash-1.5",
+      "mistral-7b": "mistralai/mistral-7b-instruct",
+      "claude-haiku": "anthropic/claude-3-haiku",
+      "gpt-4o-mini": "openai/gpt-4o-mini",
+    };
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: "Messages are required" }, { status: 400 });
@@ -47,9 +55,8 @@ export async function POST(req: Request) {
       throw new Error("Missing OPENROUTER_API_KEY");
     }
 
-    // Vamos usar o modelo online se disponível ou o modelo padrao
-    // O usuário precisa configurar na Vercel o OPENROUTER_MODEL_CHAT
-    const model = process.env.OPENROUTER_MODEL_CHAT || "meta-llama/llama-3.1-8b-instruct";
+    // Model: prefer the one sent from frontend, then env var, then default
+    const model = MODEL_MAP[modelKey] || process.env.OPENROUTER_MODEL_CHAT || "meta-llama/llama-3.1-8b-instruct";
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
