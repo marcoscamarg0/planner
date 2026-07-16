@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle } from "lucide-react";
+import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn, getPriorityColor, getPriorityLabel, getStatusLabel, formatDate } from "@/lib/utils";
 import type { Task, TaskStatus, TaskPriority } from "@/types";
@@ -35,11 +35,43 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [subtaskFormId, setSubtaskFormId] = useState<string | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
   const filteredTasks =
     filterStatus === "all"
       ? tasks
       : tasks.filter((t) => t.status === filterStatus);
+
+  const generateTaskPlan = async (taskId: string, taskTitle: string, currentDescription: string | null) => {
+    setLoadingPlanId(taskId);
+    try {
+      const res = await fetch("/api/ai/task-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskTitle,
+          projectTitle: document.querySelector("h2")?.innerText || ""
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.plan) {
+          const newDesc = currentDescription 
+            ? currentDescription + "\n\n---\n**Plano de Ação (IA)**:\n" + data.plan 
+            : "**Plano de Ação (IA)**:\n" + data.plan;
+          
+          await updateDescription(taskId, newDesc);
+        }
+      } else {
+        alert("Falha ao gerar plano de ação.");
+      }
+    } catch (e) {
+      alert("Erro ao conectar com a IA.");
+    } finally {
+      setLoadingPlanId(null);
+    }
+  };
 
   const addSubtask = async (parentId: string, e: React.FormEvent) => {
     e.preventDefault();
@@ -261,7 +293,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
-                            className="mt-2 overflow-hidden"
+                            className="mt-2 overflow-hidden flex flex-col gap-2"
                           >
                             <textarea
                               defaultValue={task.description || ""}
@@ -269,6 +301,20 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                               placeholder="Adicionar observações detalhadas..."
                               className="w-full text-xs bg-black/10 dark:bg-black/40 text-foreground placeholder:text-muted-foreground rounded-lg p-3 outline-none border border-border/50 resize-y min-h-[80px] focus:border-primary/50 transition-colors"
                             />
+                            <div className="flex justify-end">
+                              <button
+                                onClick={() => generateTaskPlan(task.id, task.title, task.description)}
+                                disabled={loadingPlanId === task.id}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-[11px] font-medium hover:bg-primary/30 transition-colors disabled:opacity-50"
+                              >
+                                {loadingPlanId === task.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Sparkles className="w-3.5 h-3.5" />
+                                )}
+                                {loadingPlanId === task.id ? "Gerando..." : "Detalhar com IA"}
+                              </button>
+                            </div>
                           </motion.div>
                         )}
                       </AnimatePresence>

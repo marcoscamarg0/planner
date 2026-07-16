@@ -80,6 +80,21 @@ export async function POST(req: Request) {
                 required: ["project_id", "title"]
               }
             }
+          },
+          {
+            type: "function",
+            function: {
+              name: "create_page",
+              description: "Cria um novo documento/página em um projeto do usuário.",
+              parameters: {
+                type: "object",
+                properties: {
+                  project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
+                  title: { type: "string", description: "O título da página" }
+                },
+                required: ["project_id", "title"]
+              }
+            }
           }
         ]
       }),
@@ -117,6 +132,28 @@ export async function POST(req: Request) {
             }
           } catch (e) {
             toolsFeedback += `Erro ao processar criação da tarefa.\n`;
+          }
+        } else if (call.function.name === "create_page") {
+          try {
+            const args = JSON.parse(call.function.arguments);
+            // Busca a contagem atual para order_index
+            const { count } = await supabase.from("pages").select("*", { count: 'exact', head: true }).eq("project_id", args.project_id);
+            const { error } = await supabase
+              .from("pages")
+              .insert({
+                project_id: args.project_id,
+                title: args.title,
+                content: null,
+                order_index: count || 0,
+              });
+              
+            if (error) {
+              toolsFeedback += `Erro ao criar página "${args.title}": ${error.message}\n`;
+            } else {
+              toolsFeedback += `📄 Página **${args.title}** criada com sucesso!\n`;
+            }
+          } catch (e) {
+            toolsFeedback += `Erro ao processar criação da página.\n`;
           }
         }
       }
