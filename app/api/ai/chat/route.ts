@@ -63,6 +63,25 @@ export async function POST(req: Request) {
         model: model,
         messages: promptMessages,
         temperature: 0.3,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "create_task",
+              description: "Cria uma nova demanda/tarefa em um projeto do usuário.",
+              parameters: {
+                type: "object",
+                properties: {
+                  project_id: { type: "string", description: "O ID (UUID) do projeto alvo" },
+                  title: { type: "string", description: "O título da tarefa" },
+                  priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
+                  description: { type: "string", description: "Observações ou detalhes da tarefa" }
+                },
+                required: ["project_id", "title"]
+              }
+            }
+          }
+        ]
       }),
     });
 
@@ -73,8 +92,38 @@ export async function POST(req: Request) {
     }
 
     const data = await response.json();
-    const reply = data.choices[0]?.message?.content || "Sem resposta.";
+    const message = data.choices[0]?.message;
 
+    if (message?.tool_calls?.length > 0) {
+      let toolsFeedback = "";
+      for (const call of message.tool_calls) {
+        if (call.function.name === "create_task") {
+          try {
+            const args = JSON.parse(call.function.arguments);
+            const { error } = await supabase
+              .from("tasks")
+              .insert({
+                project_id: args.project_id,
+                title: args.title,
+                priority: args.priority || "medium",
+                description: args.description || null,
+                status: "todo",
+              });
+              
+            if (error) {
+              toolsFeedback += `Erro ao criar tarefa "${args.title}": ${error.message}\n`;
+            } else {
+              toolsFeedback += `✅ Tarefa **${args.title}** criada com sucesso!\n`;
+            }
+          } catch (e) {
+            toolsFeedback += `Erro ao processar criação da tarefa.\n`;
+          }
+        }
+      }
+      return NextResponse.json({ reply: toolsFeedback + (message.content ? "\n\n" + message.content : "") });
+    }
+
+    const reply = message?.content || "Sem resposta.";
     return NextResponse.json({ reply });
 
   } catch (error: any) {

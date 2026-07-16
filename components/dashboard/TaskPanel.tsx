@@ -32,6 +32,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "all">("all");
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
 
   const filteredTasks =
     filterStatus === "all"
@@ -81,6 +82,14 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
     await supabase.from("tasks").update({ priority }).eq("id", taskId);
     onTasksChange(
       tasks.map((t) => (t.id === taskId ? { ...t, priority } : t))
+    );
+  };
+
+  const updateDescription = async (taskId: string, description: string) => {
+    const supabase = createClient();
+    await supabase.from("tasks").update({ description }).eq("id", taskId);
+    onTasksChange(
+      tasks.map((t) => (t.id === taskId ? { ...t, description } : t))
     );
   };
 
@@ -176,53 +185,81 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                 exit={{ opacity: 0, x: -16 }}
                 transition={{ delay: i * 0.03 }}
                 className={cn(
-                  "flex items-start gap-3 px-4 py-3 rounded-xl glass-hover group",
+                  "flex items-start gap-3 px-4 py-3 rounded-xl glass-hover group flex-col sm:flex-row",
                   task.status === "done" && "opacity-60"
                 )}
               >
-                <button
-                  onClick={() => cycleStatus(task)}
-                  aria-label={`Status: ${getStatusLabel(task.status)}. Clique para avançar.`}
-                  className={cn(
-                    "mt-0.5 shrink-0 transition-colors",
-                    task.status === "done" ? "text-emerald-400" : "text-muted-foreground hover:text-primary"
-                  )}
-                >
-                  <StatusIcon className="w-4 h-4" />
-                </button>
-
-                <div className="flex-1 min-w-0">
-                  <p
+                <div className="flex items-start gap-3 w-full">
+                  <button
+                    onClick={() => cycleStatus(task)}
+                    aria-label={`Status: ${getStatusLabel(task.status)}. Clique para avançar.`}
                     className={cn(
-                      "text-sm text-foreground leading-relaxed",
-                      task.status === "done" && "line-through text-muted-foreground"
+                      "mt-0.5 shrink-0 transition-colors",
+                      task.status === "done" ? "text-emerald-400" : "text-muted-foreground hover:text-primary"
                     )}
                   >
-                    {task.title}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1">
-                    <select
-                      value={task.priority}
-                      onChange={(e) =>
-                        updatePriority(task.id, e.target.value as TaskPriority)
-                      }
-                      aria-label={`Prioridade de ${task.title}`}
+                    <StatusIcon className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex-1 min-w-0">
+                    <p
                       className={cn(
-                        "bg-transparent text-xs font-medium border-none outline-none cursor-pointer",
-                        getPriorityColor(task.priority)
+                        "text-sm text-foreground leading-relaxed",
+                        task.status === "done" && "line-through text-muted-foreground"
                       )}
                     >
-                      {(["low", "medium", "high", "urgent"] as TaskPriority[]).map((p) => (
-                        <option key={p} value={p} className="bg-card text-foreground">
-                          {getPriorityLabel(p)}
-                        </option>
-                      ))}
-                    </select>
-                    {task.due_date && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatDate(task.due_date)}
-                      </span>
-                    )}
+                      {task.title}
+                    </p>
+                    
+                    <AnimatePresence>
+                      {expandedTaskId === task.id && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-2 overflow-hidden"
+                        >
+                          <textarea
+                            defaultValue={task.description || ""}
+                            onBlur={(e) => updateDescription(task.id, e.target.value)}
+                            placeholder="Adicionar observações detalhadas..."
+                            className="w-full text-xs bg-black/10 dark:bg-black/40 text-foreground placeholder:text-muted-foreground rounded-lg p-3 outline-none border border-border/50 resize-y min-h-[80px] focus:border-primary/50 transition-colors"
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <div className="flex items-center gap-3 mt-2 flex-wrap">
+                      <select
+                        value={task.priority}
+                        onChange={(e) =>
+                          updatePriority(task.id, e.target.value as TaskPriority)
+                        }
+                        aria-label={`Prioridade de ${task.title}`}
+                        className={cn(
+                          "bg-transparent text-[11px] font-medium border-none outline-none cursor-pointer uppercase tracking-wider",
+                          getPriorityColor(task.priority)
+                        )}
+                      >
+                        {(["low", "medium", "high", "urgent"] as TaskPriority[]).map((p) => (
+                          <option key={p} value={p} className="bg-card text-foreground">
+                            {getPriorityLabel(p)}
+                          </option>
+                        ))}
+                      </select>
+                      {task.due_date && (
+                        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+                          {formatDate(task.due_date)}
+                        </span>
+                      )}
+                      
+                      <button
+                        onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                        className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 ml-auto sm:ml-0"
+                      >
+                        {task.description ? "📝 VER OBSERVAÇÕES" : "➕ OBSERVAÇÕES"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </motion.div>
