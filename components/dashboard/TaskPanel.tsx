@@ -33,11 +33,37 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "all">("all");
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [subtaskFormId, setSubtaskFormId] = useState<string | null>(null);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
 
   const filteredTasks =
     filterStatus === "all"
       ? tasks
       : tasks.filter((t) => t.status === filterStatus);
+
+  const addSubtask = async (parentId: string, e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSubtaskTitle.trim()) return;
+
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("tasks")
+      .insert({
+        project_id: projectId,
+        parent_task_id: parentId,
+        title: newSubtaskTitle.trim(),
+        status: "todo",
+        priority: "medium",
+      })
+      .select()
+      .single();
+
+    if (data) {
+      onTasksChange([...tasks, data as Task]);
+      setNewSubtaskTitle("");
+      setSubtaskFormId(null);
+    }
+  };
 
   const addTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +117,19 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
     onTasksChange(
       tasks.map((t) => (t.id === taskId ? { ...t, description } : t))
     );
+  };
+
+  const deleteTask = async (taskId: string) => {
+    if (!confirm("Tem certeza que deseja apagar esta tarefa?")) return;
+    const supabase = createClient();
+    await supabase.from("tasks").delete().eq("id", taskId);
+    onTasksChange(tasks.filter((t) => t.id !== taskId && t.parent_task_id !== taskId));
+  };
+
+  const cancelTask = async (taskId: string) => {
+    const supabase = createClient();
+    await supabase.from("tasks").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", taskId);
+    onTasksChange(tasks.map((t) => (t.id === taskId ? { ...t, status: "cancelled" } : t)));
   };
 
   const statusFilters: (TaskStatus | "all")[] = [
@@ -175,8 +214,10 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
         </AnimatePresence>
 
         <AnimatePresence>
-          {filteredTasks.map((task, i) => {
+          {filteredTasks.filter(t => !t.parent_task_id).map((task, i) => {
             const StatusIcon = STATUS_ICON[task.status];
+            const taskSubtasks = tasks.filter(t => t.parent_task_id === task.id && (filterStatus === "all" || t.status === filterStatus));
+            
             return (
               <motion.div
                 key={task.id}
@@ -184,84 +225,205 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, x: -16 }}
                 transition={{ delay: i * 0.03 }}
-                className={cn(
-                  "flex items-start gap-3 px-4 py-3 rounded-xl glass-hover group flex-col sm:flex-row",
-                  task.status === "done" && "opacity-60"
-                )}
+                className="mb-2"
               >
-                <div className="flex items-start gap-3 w-full">
-                  <button
-                    onClick={() => cycleStatus(task)}
-                    aria-label={`Status: ${getStatusLabel(task.status)}. Clique para avançar.`}
-                    className={cn(
-                      "mt-0.5 shrink-0 transition-colors",
-                      task.status === "done" ? "text-emerald-400" : "text-muted-foreground hover:text-primary"
-                    )}
-                  >
-                    <StatusIcon className="w-4 h-4" />
-                  </button>
-
-                  <div className="flex-1 min-w-0">
-                    <p
+                <div
+                  className={cn(
+                    "flex items-start gap-3 px-4 py-3 rounded-xl glass-hover group flex-col sm:flex-row relative",
+                    task.status === "done" && "opacity-60"
+                  )}
+                >
+                  <div className="flex items-start gap-3 w-full z-10">
+                    <button
+                      onClick={() => cycleStatus(task)}
+                      aria-label={`Status: ${getStatusLabel(task.status)}. Clique para avançar.`}
                       className={cn(
-                        "text-sm text-foreground leading-relaxed",
-                        task.status === "done" && "line-through text-muted-foreground"
+                        "mt-0.5 shrink-0 transition-colors",
+                        task.status === "done" ? "text-emerald-400" : "text-muted-foreground hover:text-primary"
                       )}
                     >
-                      {task.title}
-                    </p>
-                    
-                    <AnimatePresence>
-                      {expandedTaskId === task.id && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-2 overflow-hidden"
-                        >
-                          <textarea
-                            defaultValue={task.description || ""}
-                            onBlur={(e) => updateDescription(task.id, e.target.value)}
-                            placeholder="Adicionar observações detalhadas..."
-                            className="w-full text-xs bg-black/10 dark:bg-black/40 text-foreground placeholder:text-muted-foreground rounded-lg p-3 outline-none border border-border/50 resize-y min-h-[80px] focus:border-primary/50 transition-colors"
-                          />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                      <StatusIcon className="w-4 h-4" />
+                    </button>
 
-                    <div className="flex items-center gap-3 mt-2 flex-wrap">
-                      <select
-                        value={task.priority}
-                        onChange={(e) =>
-                          updatePriority(task.id, e.target.value as TaskPriority)
-                        }
-                        aria-label={`Prioridade de ${task.title}`}
+                    <div className="flex-1 min-w-0">
+                      <p
                         className={cn(
-                          "bg-transparent text-[11px] font-medium border-none outline-none cursor-pointer uppercase tracking-wider",
-                          getPriorityColor(task.priority)
+                          "text-sm text-foreground leading-relaxed",
+                          task.status === "done" && "line-through text-muted-foreground"
                         )}
                       >
-                        {(["low", "medium", "high", "urgent"] as TaskPriority[]).map((p) => (
-                          <option key={p} value={p} className="bg-card text-foreground">
-                            {getPriorityLabel(p)}
-                          </option>
-                        ))}
-                      </select>
-                      {task.due_date && (
-                        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
-                          {formatDate(task.due_date)}
-                        </span>
-                      )}
+                        {task.title}
+                      </p>
                       
-                      <button
-                        onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                        className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 ml-auto sm:ml-0"
-                      >
-                        {task.description ? "📝 VER OBSERVAÇÕES" : "➕ OBSERVAÇÕES"}
-                      </button>
+                      <AnimatePresence>
+                        {expandedTaskId === task.id && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mt-2 overflow-hidden"
+                          >
+                            <textarea
+                              defaultValue={task.description || ""}
+                              onBlur={(e) => updateDescription(task.id, e.target.value)}
+                              placeholder="Adicionar observações detalhadas..."
+                              className="w-full text-xs bg-black/10 dark:bg-black/40 text-foreground placeholder:text-muted-foreground rounded-lg p-3 outline-none border border-border/50 resize-y min-h-[80px] focus:border-primary/50 transition-colors"
+                            />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <div className="flex items-center gap-3 mt-2 flex-wrap">
+                        <select
+                          value={task.priority}
+                          onChange={(e) =>
+                            updatePriority(task.id, e.target.value as TaskPriority)
+                          }
+                          aria-label={`Prioridade de ${task.title}`}
+                          className={cn(
+                            "bg-transparent text-[11px] font-medium border-none outline-none cursor-pointer uppercase tracking-wider",
+                            getPriorityColor(task.priority)
+                          )}
+                        >
+                          {(["low", "medium", "high", "urgent"] as TaskPriority[]).map((p) => (
+                            <option key={p} value={p} className="bg-card text-foreground">
+                              {getPriorityLabel(p)}
+                            </option>
+                          ))}
+                        </select>
+                        {task.due_date && (
+                          <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+                            {formatDate(task.due_date)}
+                          </span>
+                        )}
+                        
+                        <div className="flex items-center gap-2 ml-auto sm:ml-0">
+                          <button
+                            onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                            className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
+                            title="Observações"
+                          >
+                            {task.description ? "📝" : "➕"} OBS
+                          </button>
+                          <button
+                            onClick={() => setSubtaskFormId(subtaskFormId === task.id ? null : task.id)}
+                            className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
+                            title="Adicionar Subtarefa"
+                          >
+                            ➕ SUB
+                          </button>
+                          <button
+                            onClick={() => cancelTask(task.id)}
+                            className="text-[10px] uppercase font-bold text-amber-500/70 hover:text-amber-500 transition-colors flex items-center gap-1 ml-1"
+                            title="Cancelar Tarefa"
+                          >
+                            CANCELAR
+                          </button>
+                          <button
+                            onClick={() => deleteTask(task.id)}
+                            className="text-[10px] uppercase font-bold text-rose-500/70 hover:text-rose-500 transition-colors flex items-center gap-1"
+                            title="Apagar Tarefa"
+                          >
+                            APAGAR
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
+
+                <AnimatePresence>
+                  {subtaskFormId === task.id && (
+                    <motion.form
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      onSubmit={(e) => addSubtask(task.id, e)}
+                      className="ml-8 mt-2 flex items-center gap-2 glass rounded-xl px-4 py-2 relative overflow-hidden"
+                    >
+                      <div className="absolute left-[-24px] top-1/2 w-8 h-px bg-border/50" />
+                      <input
+                        type="text"
+                        value={newSubtaskTitle}
+                        onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                        placeholder="Título da subtarefa..."
+                        autoFocus
+                        className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!newSubtaskTitle.trim()}
+                        className="px-3 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium disabled:opacity-50 hover:bg-primary/30 transition-colors"
+                      >
+                        Salvar
+                      </button>
+                    </motion.form>
+                  )}
+                </AnimatePresence>
+
+                {taskSubtasks.length > 0 && (
+                  <div className="ml-8 mt-2 space-y-2 relative">
+                    <div className="absolute left-[-20px] top-0 bottom-4 w-px bg-border/50" />
+                    {taskSubtasks.map(subtask => {
+                      const SubIcon = STATUS_ICON[subtask.status];
+                      return (
+                        <div key={subtask.id} className="relative">
+                          <div className="absolute left-[-20px] top-4 w-4 h-px bg-border/50" />
+                          <div className={cn(
+                            "flex items-start gap-3 px-4 py-2 rounded-xl glass-hover group flex-col sm:flex-row",
+                            subtask.status === "done" && "opacity-60"
+                          )}>
+                            <button
+                              onClick={() => cycleStatus(subtask)}
+                              className={cn(
+                                "mt-0.5 shrink-0 transition-colors",
+                                subtask.status === "done" ? "text-emerald-400" : "text-muted-foreground hover:text-primary"
+                              )}
+                            >
+                              <SubIcon className="w-4 h-4" />
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <p className={cn(
+                                "text-sm text-foreground leading-relaxed",
+                                subtask.status === "done" && "line-through text-muted-foreground"
+                              )}>
+                                {subtask.title}
+                              </p>
+                              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                <select
+                                  value={subtask.priority}
+                                  onChange={(e) => updatePriority(subtask.id, e.target.value as TaskPriority)}
+                                  className={cn("bg-transparent text-[11px] font-medium border-none outline-none cursor-pointer uppercase tracking-wider", getPriorityColor(subtask.priority))}
+                                >
+                                  {(["low", "medium", "high", "urgent"] as TaskPriority[]).map((p) => (
+                                    <option key={p} value={p} className="bg-card text-foreground">{getPriorityLabel(p)}</option>
+                                  ))}
+                                </select>
+                                
+                                <div className="flex items-center gap-2 ml-auto">
+                                  <button
+                                    onClick={() => cancelTask(subtask.id)}
+                                    className="text-[10px] uppercase font-bold text-amber-500/70 hover:text-amber-500 transition-colors"
+                                    title="Cancelar Subtarefa"
+                                  >
+                                    CANCELAR
+                                  </button>
+                                  <button
+                                    onClick={() => deleteTask(subtask.id)}
+                                    className="text-[10px] uppercase font-bold text-rose-500/70 hover:text-rose-500 transition-colors"
+                                    title="Apagar Subtarefa"
+                                  >
+                                    APAGAR
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </motion.div>
             );
           })}
