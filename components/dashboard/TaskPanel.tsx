@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn, getPriorityColor, getPriorityLabel, getStatusLabel, formatDate } from "@/lib/utils";
 import type { Task, TaskStatus, TaskPriority } from "@/types";
 import { TaskDetailPane } from "./TaskDetailPane";
@@ -32,6 +32,7 @@ const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
 export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const activeTaskId = searchParams.get("taskId");
 
   const [newTitle, setNewTitle] = useState("");
@@ -160,7 +161,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
         taskId={activeTaskId}
         tasks={tasks}
         onTasksChange={onTasksChange}
-        onClose={() => router.push(`?`)}
+        onClose={() => router.push(pathname)}
       />
       <div className="px-6 py-4 border-b border-border flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-1 flex-wrap">
@@ -294,7 +295,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                         
                         <div className="flex items-center gap-2 ml-auto sm:ml-0">
                           <button
-                            onClick={() => router.push(`?taskId=${task.id}`)}
+                            onClick={() => router.push(`${pathname}?taskId=${task.id}`)}
                             className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
                             title="Abrir Detalhes"
                           >
@@ -397,7 +398,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                                 
                                 <div className="flex items-center gap-2 ml-auto">
                                   <button
-                                    onClick={() => router.push(`?taskId=${subtask.id}`)}
+                                    onClick={() => router.push(`${pathname}?taskId=${subtask.id}`)}
                                     className="text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
                                     title="Abrir Detalhes"
                                   >

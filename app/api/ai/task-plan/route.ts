@@ -16,6 +16,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Task title is required" }, { status: 400 });
     }
 
+    // Busca as referências do usuário para dar contexto à IA
+    const { data: references } = await supabase
+      .from("knowledge_sources")
+      .select("title, type, content")
+      .eq("owner_id", user.id)
+      .limit(10);
+    
+    const contextText = references && references.length > 0 
+      ? "\n\n=== CONTEXTO DO USUÁRIO (Referências) ===\n" + 
+        references.map(r => `[${r.type}] ${r.title}\n${(r.content || "").slice(0, 1000)}`).join("\n\n") + 
+        "\n========================================="
+      : "";
+
     const openRouterApiKey = process.env.OPENROUTER_API_KEY;
     if (!openRouterApiKey) {
       throw new Error("Missing OPENROUTER_API_KEY");
@@ -32,6 +45,7 @@ export async function POST(req: Request) {
     const userPrompt =
       "Projeto: " + (projectTitle || "Nao especificado") +
       "\nTarefa: " + taskTitle +
+      contextText +
       "\n\nEscreva um plano de acao detalhado (passo a passo) para executar esta demanda.";
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {

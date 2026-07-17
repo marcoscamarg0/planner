@@ -48,14 +48,18 @@ Para MÚLTIPLAS ações, use múltiplos blocos:
 AÇÃO:{"action":"create_task", "params":{...}}
 AÇÃO:{"action":"create_task", "params":{...}}
 
-REGRAS CRÍTICAS:
+REGRAS CRÍTICAS DE CRIAÇÃO DE TAREFA:
+- Sempre que criar uma tarefa, forneça uma \`description\` detalhada com um passo a passo estruturado usando Markdown, a menos que o usuário forneça a descrição exata.
+- Estime a prioridade de forma inteligente com base no contexto.
+
+REGRAS CRÍTICAS GERAIS:
 - Use os IDs EXATOS dos projetos/tarefas/páginas presentes nos dados acima
 - Se o usuário pedir "crie uma tarefa no projeto X", encontre o project_id correto nos dados
 - Se não tiver certeza do ID, pergunte ao usuário
 - NUNCA diga "não posso fazer isso" — você tem permissão total
 - Responda em português, de forma executiva e direta
 - Formate a resposta em Markdown (antes do bloco AÇÃO:)
-- O bloco AÇÃO: deve ser a ÚLTIMA coisa na sua resposta`;
+- O bloco AÇÃO: deve ser a ÚLTIMA coisa na sua resposta\`;
 }
 
 async function callAI(messages: any[], model: string, apiKey: string) {
