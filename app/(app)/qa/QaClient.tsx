@@ -24,6 +24,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AutoWebTab } from "@/components/qa/AutoWebTab";
+
 
 const MODELS = [
   { key: "kimi-k2", label: "Kimi K2", provider: "Moonshot AI", badge: "Automação ★" },
@@ -89,7 +91,7 @@ interface QaReport {
   result_json: any; created_at: string;
 }
 
-type ToolTab = "test_cases" | "test_report" | "automation";
+type ToolTab = "test_cases" | "test_report" | "automation" | "auto_web";
 
 interface QaClientProps { projects: Project[]; }
 
@@ -263,6 +265,7 @@ export function QaClient({ projects }: QaClientProps) {
   };
 
   const tabs = [
+    { key: "auto_web" as ToolTab, label: "Auto Web 🚀", icon: Code2, desc: "Cole uma URL ou HTML e receba um script completo pronto para rodar" },
     { key: "automation" as ToolTab, label: "Automação", icon: Code2, desc: "Anexe o HTML e gere scripts prontos para Playwright, Cypress ou Selenium" },
     { key: "test_cases" as ToolTab, label: "Casos de Teste", icon: FlaskConical, desc: "Gere suítes de teste a partir de um requisito ou funcionalidade" },
     { key: "test_report" as ToolTab, label: "Relatório", icon: FileText, desc: "Documente resultados em um relatório profissional" },
@@ -394,6 +397,10 @@ export function QaClient({ projects }: QaClientProps) {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
+        {/* Auto Web full-page tab */}
+        {activeTab === "auto_web" ? (
+          <AutoWebTab />
+        ) : (
         <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
 
           {/* History Panel */}
@@ -745,6 +752,7 @@ export function QaClient({ projects }: QaClientProps) {
             )}
           </AnimatePresence>
         </div>
+        )}
       </div>
     </div>
   );
