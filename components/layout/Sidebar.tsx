@@ -12,6 +12,7 @@ import {
   Plus,
   Calendar,
   TestTube2,
+  Network,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
@@ -41,6 +42,11 @@ const navItems = [
     href: "/qa",
     label: "Qualidade & Testes",
     icon: TestTube2,
+  },
+  {
+    href: "/organogram",
+    label: "Mapas Mentais",
+    icon: Network,
   },
 ];
 
