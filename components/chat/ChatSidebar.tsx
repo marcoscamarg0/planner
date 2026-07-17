@@ -111,6 +111,23 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    const saved = localStorage.getItem("chat_messages");
+    if (saved) {
+      try {
+        setMessages(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse saved messages");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > 1) {
+      localStorage.setItem("chat_messages", JSON.stringify(messages));
+    }
+  }, [messages]);
+
+  useEffect(() => {
     if (tab === "chat") {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
