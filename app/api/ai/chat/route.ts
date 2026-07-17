@@ -59,7 +59,7 @@ REGRAS CRÍTICAS GERAIS:
 - NUNCA diga "não posso fazer isso" — você tem permissão total
 - Responda em português, de forma executiva e direta
 - Formate a resposta em Markdown (antes do bloco AÇÃO:)
-- O bloco AÇÃO: deve ser a ÚLTIMA coisa na sua resposta\`;
+- O bloco AÇÃO: deve ser a ÚLTIMA coisa na sua resposta`;
 }
 
 async function callAI(messages: any[], model: string, apiKey: string) {
