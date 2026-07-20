@@ -340,28 +340,16 @@ export function QaClient({ projects }: QaClientProps) {
     setError(null);
 
     try {
-      let res: Response;
-
-      if (htmlFile && activeTab === "automation") {
-        const form = new FormData();
-        form.append("tool_type", activeTab);
-        form.append("input", input.trim());
-        form.append("framework", selectedFramework);
-        form.append("model", selectedModel);
-        form.append("html_file", htmlFile);
-        res = await fetch("/api/ai/qa", { method: "POST", body: form });
-      } else {
-        res = await fetch("/api/ai/qa", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tool_type: activeTab,
-            input: input.trim(),
-            framework: selectedFramework,
-            model: selectedModel,
-          }),
-        });
-      }
+      const res = await fetch("/api/ai/qa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool_type: activeTab,
+          input: input.trim(),
+          framework: selectedFramework,
+          model: selectedModel,
+        }),
+      });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha na geração");
@@ -982,12 +970,7 @@ export function QaClient({ projects }: QaClientProps) {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
-        {/* Smart Runner — full-page tab */}
-        {activeTab === "smart_runner" ? (
-          <SmartRunnerTab />
-        ) : (
-
-        <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
+        <div className="max-w-5xl mx-auto px-6 pt-6">
 
           {/* History Panel */}
           <AnimatePresence>
@@ -1110,8 +1093,6 @@ export function QaClient({ projects }: QaClientProps) {
                     )}
                   </AnimatePresence>
                 </div>
-              </motion.div>
-            )}
               </motion.div>
             )}
           </AnimatePresence>
