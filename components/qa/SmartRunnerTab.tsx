@@ -699,7 +699,7 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                               <img
                                 src={`data:image/png;base64,${step.screenshotBase64}`}
                                 alt={`Evidência passo ${step.index}`}
-                                className="rounded-lg border border-border max-h-48 object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity"
+                                className="rounded-lg border border-border max-h-96 object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity"
                                 onClick={() => window.open(`data:image/png;base64,${step.screenshotBase64}`, "_blank")}
                               />
                             </div>

@@ -144,9 +144,9 @@ h1,h2,h3,h4{font-family:'Outfit',sans-serif;color:#0f172a}
 .result-header{background:#f8fafc;padding:14px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center}
 .badge{padding:5px 11px;border-radius:24px;font-size:12px;font-weight:600}
 .index{color:#94a3b8;font-weight:600;font-size:13px}
-.result-body{display:flex;padding:20px;gap:20px}
-.result-evidencia{width:320px;min-height:110px;display:flex;justify-content:center;align-items:center;background:#f8fafc;border:1px dashed #cbd5e1;padding:12px;flex-shrink:0}
-.evidencia-img{max-width:100%;max-height:200px;border-radius:6px;box-shadow:0 4px 6px -1px rgba(0,0,0,.15);object-fit:contain}
+.result-body{display:flex;flex-direction:column;padding:20px;gap:20px}
+.result-evidencia{width:100%;display:flex;justify-content:center;align-items:center;background:#f8fafc;border:1px dashed #cbd5e1;padding:12px;flex-shrink:0}
+.evidencia-img{max-width:100%;max-height:550px;border-radius:6px;box-shadow:0 4px 6px -1px rgba(0,0,0,.15);object-fit:contain}
 .sem-evidencia{color:#94a3b8;font-size:12px}
 .result-details{flex:1}
 .label-title{font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;margin:0 0 5px}
@@ -166,9 +166,9 @@ h1,h2,h3,h4{font-family:'Outfit',sans-serif;color:#0f172a}
     box-shadow: none !important;
   }
   h2.section-title { page-break-after: avoid; }
-  .result-evidencia { width: 45%; max-width: 45%; background: white !important; }
-  .evidencia-img { max-height: 250px; }
-  .result-body { flex-wrap: nowrap; }
+  .result-evidencia { width: 100%; max-width: 100%; background: white !important; }
+  .evidencia-img { max-height: 650px; }
+  .result-body { flex-direction: column; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 </style>

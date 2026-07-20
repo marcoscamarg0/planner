@@ -62,12 +62,12 @@ async function generateStepsFromDescription(
 Dado uma URL e a descrição de um fluxo de teste, gere um array de passos de automação JSON.
 
 REGRAS OBRIGATÓRIAS:
+- GERE PASSOS EXTREMAMENTE DETALHADOS. Em vez de "Fazer login", divida a ação em: "Aguardar carregamento da página", "Clicar no campo de email", "Digitar email", "Clicar no campo de senha", "Digitar senha", "Clicar em Entrar", "Aguardar navegação".
 - Sempre comece com um passo "goto" para a URL fornecida
 - Use seletores reais e robustos (prefira role/text/css)
-- Lide com cookies/consent banners se existirem
-- Inclua passos de verificação (scroll para elementos importantes)
-- Máximo de 20 passos
-- Seja específico nos labels (ex: "Clicar no botão Login" não "Clicar botão")
+- Inclua passos de verificação intermediários (como scroll ou wait)
+- Máximo de 30 passos
+- Seja extremamente descritivo nos labels (ex: "Clicar no botão primário de Login no canto superior direito")
 
 FORMATO de resposta (JSON puro, sem markdown):
 {
