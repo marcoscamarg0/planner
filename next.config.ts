@@ -9,6 +9,15 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Playwright and related packages must run only on the Node.js server side
+  serverExternalPackages: [
+    "@playwright/test",
+    "playwright",
+    "playwright-core",
+    "@axe-core/playwright",
+    "bullmq",
+    "ioredis",
+  ],
   experimental: {
     serverActions: {
       allowedOrigins: ["localhost:3000"],

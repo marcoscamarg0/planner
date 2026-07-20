@@ -5,10 +5,12 @@ export const runtime = "nodejs";
 
 const AVAILABLE_MODELS: Record<string, string> = {
   "auto-free": "openrouter/free",
-  "kimi-k2": "moonshotai/kimi-k2:free",
-  "nemotron-70b": "nvidia/llama-3.1-nemotron-70b-instruct:free",
+  "kimi-k2": "google/gemini-2.0-flash-exp:free",
+  "nemotron-70b": "nvidia/nemotron-3-super-120b-a12b:free",
+  "nemotron-super": "nvidia/nemotron-3-super-120b-a12b:free",
   "qwen-coder": "qwen/qwen-2.5-coder-32b-instruct:free",
   "laguna-xs": "poolside/laguna-xs-2.1:free",
+  "gpt-oss": "openai/gpt-oss-20b:free",
   "cohere-north": "cohere/north-mini-code:free",
 };
 
@@ -176,40 +178,119 @@ export async function POST(req: Request) {
 
     const contentType = req.headers.get("content-type") || "";
 
+    let action: string = "";
     let url: string = "";
     let htmlContent: string = "";
     let framework: string = "playwright";
     let model: string = "kimi-k2";
     let description: string = "";
     let projectName: string = "auto-test";
+    let scriptContent: string = "";
+    let reportContent: string = "";
+    let reportId: string = "";
 
     if (contentType.includes("multipart/form-data")) {
       const form = await req.formData();
+      action = form.get("action") as string || "";
       url = form.get("url") as string || "";
       framework = form.get("framework") as string || "playwright";
       model = form.get("model") as string || "kimi-k2";
       description = form.get("description") as string || "";
       projectName = form.get("projectName") as string || "auto-test";
+      scriptContent = form.get("scriptContent") as string || "";
+      reportContent = form.get("reportContent") as string || "";
+      reportId = form.get("reportId") as string || "";
       const file = form.get("html_file") as File | null;
       if (file) {
         htmlContent = await file.text();
       }
     } else {
       const body = await req.json();
+      action = body.action || "";
       url = body.url || "";
       htmlContent = body.html_content || "";
       framework = body.framework || "playwright";
       model = body.model || "kimi-k2";
       description = body.description || "";
       projectName = body.projectName || "auto-test";
+      scriptContent = body.scriptContent || "";
+      reportContent = body.reportContent || "";
+      reportId = body.reportId || "";
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
 
+    // Action: Manual Insert
+    if (action === "manual") {
+      const packageJson = buildPackageJson(framework, projectName);
+      const { data, error } = await supabase
+        .from("auto_web_reports")
+        .insert({
+          user_id: user.id,
+          source_url: url || null,
+          source_name: projectName || url || "Relatório Manual",
+          framework,
+          model_used: "manual",
+          project_name: projectName,
+          script_content: scriptContent,
+          package_json: packageJson,
+          report_content: reportContent,
+          description: description || "Relatório adicionado manualmente",
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error("Erro ao salvar no banco: " + error.message);
+      }
+
+      return NextResponse.json(data);
+    }
+
+    // Action: Improve existing report with AI
+    if (action === "improve") {
+      const sysPrompt = `Você é um Líder de QA Sênior especialista em auditoria de qualidade, acessibilidade e automação de testes.
+Sua missão é reescrever o relatório técnico fornecido para torná-lo EXTREMAMENTE profissional, completo e bem estruturado.
+Adicione análises profundas, detalhes de boas práticas (como eMAG 3.1 e WCAG 2.1 AA se aplicável) e métricas claras.
+
+IMPORTANTE: Você DEVE incluir uma seção de métricas com a exata estrutura abaixo no início do relatório para que o sistema renderize os gráficos/cards corretamente:
+MÉTRICAS DO RELATÓRIO:
+- Total de Testes: [Número]
+- Casos de Teste Aprovados: [Número]
+- Falhas Identificadas: [Número]
+- Violações de Acessibilidade/Regras: [Número]
+
+Adicione também recomendações formais sob títulos claros como "Recomendações eMAG" ou "Recomendações de Estabilidade" e detalhe cada violação encontrada com classe/seletor do elemento afetado e sugestão de correção.`;
+
+      const userPrompt = `Abaixo está o script de automação e o relatório preliminar atual. Melhore o relatório deixando-o rico, técnico e muito mais profissional.
+
+SCRIPT DE TESTE:
+${scriptContent}
+
+RELATÓRIO ATUAL:
+${reportContent}`;
+
+      const improvedContent = await callOpenRouter(
+        [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
+        model, apiKey
+      );
+
+      // If reportId provided, update it in DB
+      if (reportId && reportId !== "new") {
+        await supabase
+          .from("auto_web_reports")
+          .update({ report_content: improvedContent })
+          .eq("id", reportId)
+          .eq("user_id", user.id);
+      }
+
+      return NextResponse.json({ report: improvedContent });
+    }
+
+    // Default Action: AI Generation
     // If URL provided, fetch the HTML
     let sourceHtml = htmlContent;
-    let sourceUrl = url;
     let pageTitle = "";
     let fetchError = "";
 
@@ -299,13 +380,23 @@ Retorne APENAS o código do script sem nenhum bloco markdown.`;
 
     // Generate a markdown report
     const reportPrompt = `Com base no script de automação gerado abaixo, crie um relatório técnico de testes em Markdown.
+O relatório deve ser formal, detalhado e muito profissional.
+
+IMPORTANTE: Você deve incluir as métricas exatas do relatório no início sob a seguinte estrutura para que possamos parsear e criar cards/gráficos:
+MÉTRICAS DO RELATÓRIO:
+- Total de Testes: [Número estimado de fluxos testados]
+- Casos de Teste Aprovados: [Número estimado]
+- Falhas Identificadas: [Número estimado]
+- Violações de Acessibilidade/Regras: [Número estimado]
+
 O relatório deve conter:
 1. **Resumo** - O que foi automatizado e a URL testada
-2. **Casos de Teste Identificados** - Tabela com ID, nome, tipo e prioridade
-3. **Cobertura** - Elementos/fluxos cobertos vs. descobertos
-4. **Como Executar** - Passo a passo para instalar e rodar
-5. **Configuração do Ambiente** - Pré-requisitos e variáveis
-6. **Próximos Passos** - Melhorias sugeridas
+2. **Métricas do Relatório** - A lista estruturada descrita acima
+3. **Casos de Teste Identificados** - Tabela com ID, nome, tipo e prioridade
+4. **Cobertura** - Elementos/fluxos cobertos vs. descobertos
+5. **Como Executar** - Passo a passo para instalar e rodar
+6. **Configuração do Ambiente** - Pré-requisitos e variáveis
+7. **Próximos Passos e Recomendações** - Melhorias sugeridas, e se houver, notas sobre acessibilidade (eMAG / WCAG).
 
 Script gerado:
 ${scriptContent.slice(0, 3000)}`;

@@ -7,10 +7,12 @@ export const runtime = "nodejs";
 // Modelos gratuitos no OpenRouter
 const MODEL_MAP: Record<string, string> = {
   "auto-free": "openrouter/free",
-  "kimi-k2": "moonshotai/kimi-k2:free",
-  "nemotron-70b": "nvidia/llama-3.1-nemotron-70b-instruct:free",
+  "kimi-k2": "google/gemini-2.0-flash-exp:free",
+  "nemotron-70b": "nvidia/nemotron-3-super-120b-a12b:free",
+  "nemotron-super": "nvidia/nemotron-3-super-120b-a12b:free",
   "qwen-coder": "qwen/qwen-2.5-coder-32b-instruct:free",
   "laguna-xs": "poolside/laguna-xs-2.1:free",
+  "gpt-oss": "openai/gpt-oss-20b:free",
   "cohere-north": "cohere/north-mini-code:free",
 };
 

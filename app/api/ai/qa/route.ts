@@ -5,10 +5,12 @@ export const runtime = "nodejs";
 
 const AVAILABLE_MODELS: Record<string, string> = {
   "auto-free": "openrouter/free",
-  "kimi-k2": "moonshotai/kimi-k2:free",
-  "nemotron-70b": "nvidia/llama-3.1-nemotron-70b-instruct:free",
+  "kimi-k2": "google/gemini-2.0-flash-exp:free",
+  "nemotron-70b": "nvidia/nemotron-3-super-120b-a12b:free",
+  "nemotron-super": "nvidia/nemotron-3-super-120b-a12b:free",
   "qwen-coder": "qwen/qwen-2.5-coder-32b-instruct:free",
   "laguna-xs": "poolside/laguna-xs-2.1:free",
+  "gpt-oss": "openai/gpt-oss-20b:free",
   "cohere-north": "cohere/north-mini-code:free",
 };
 
@@ -54,6 +56,31 @@ export async function GET() {
   }
 }
 
+export async function PUT(req: Request) {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { id, result_json, result_raw } = await req.json();
+    if (!id) {
+      return NextResponse.json({ error: "Report ID is required" }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from("qa_reports")
+      .update({ result_json, result_raw })
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .select();
+
+    if (error) throw error;
+    return NextResponse.json({ success: true, report: data?.[0] });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
@@ -64,22 +91,22 @@ export async function POST(req: Request) {
     let tool_type: string, input: string, framework: string, model: string, html_content: string = "";
 
     if (contentType.includes("multipart/form-data")) {
-      const form = await req.formData();
-      tool_type = form.get("tool_type") as string;
-      input = form.get("input") as string || "";
-      framework = form.get("framework") as string || "playwright";
-      model = form.get("model") as string || "kimi-k2";
-      const file = form.get("html_file") as File | null;
-      if (file) {
-        html_content = await file.text();
-      }
+       const form = await req.formData();
+       tool_type = form.get("tool_type") as string;
+       input = form.get("input") as string || "";
+       framework = form.get("framework") as string || "playwright";
+       model = form.get("model") as string || "kimi-k2";
+       const file = form.get("html_file") as File | null;
+       if (file) {
+         html_content = await file.text();
+       }
     } else {
-      const body = await req.json();
-      tool_type = body.tool_type;
-      input = body.input;
-      framework = body.framework || "playwright";
-      model = body.model || "auto-free";
-      html_content = body.html_content || "";
+       const body = await req.json();
+       tool_type = body.tool_type;
+       input = body.input;
+       framework = body.framework || "playwright";
+       model = body.model || "auto-free";
+       html_content = body.html_content || "";
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -87,6 +114,7 @@ export async function POST(req: Request) {
 
     let result = "";
     let reportJson: any = null;
+    let createdReport: any = null;
 
     const htmlContext = html_content
       ? `\n\n=== HTML DA APLICAÇÃO (para referência dos seletores) ===\n${html_content.slice(0, 8000)}\n=======================================================`
@@ -95,11 +123,12 @@ export async function POST(req: Request) {
     if (tool_type === "test_cases") {
       const sys = "Você é um engenheiro de QA sênior especialista em criação de casos de teste. "
         + "Sua missão é gerar casos de teste completos, estruturados e profissionais. "
+        + "Se o usuário fornecer um código de automação de testes (Playwright, Cypress, Selenium, etc.), analise o código e extraia com precisão cada caso de teste implementado ou implícito nele. "
         + "Retorne EXATAMENTE um JSON válido com o formato: "
         + '{"test_cases": [{"id": "TC001", "title": "...", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
 
-      const usr = "Gere casos de teste completos para a seguinte funcionalidade:\n\n" + input + htmlContext
-        + "\n\nCubra cenários de: Happy Path, Erros esperados e Casos de borda. Retorne apenas o JSON.";
+      const usr = "Gere casos de teste completos para a seguinte funcionalidade ou a partir do código de teste abaixo:\n\n" + input + htmlContext
+        + "\n\nSe for código de teste, mapeie os steps exatos realizados na automação e o resultado esperado. Cubra cenários de: Happy Path, Erros esperados e Casos de borda. Retorne apenas o JSON.";
 
       result = await callOpenRouter(
         [{ role: "system", content: sys }, { role: "user", content: usr }],
@@ -112,7 +141,7 @@ export async function POST(req: Request) {
         reportJson = JSON.parse(jsonStr);
       } catch { reportJson = null; }
 
-      await supabase.from("qa_reports").insert({
+      const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
         type: "test_cases",
         title: "Casos de Teste — " + (input.slice(0, 60) + (input.length > 60 ? "..." : "")),
@@ -121,7 +150,8 @@ export async function POST(req: Request) {
         model_used: model,
         result_raw: result,
         result_json: reportJson,
-      });
+      }).select();
+      createdReport = inserted?.[0];
 
     } else if (tool_type === "test_report") {
       const sys = "Você é um líder de qualidade especialista em documentação de testes de software. "
@@ -137,7 +167,7 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      await supabase.from("qa_reports").insert({
+      const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
         type: "test_report",
         title: "Relatório — " + (input.slice(0, 60) + (input.length > 60 ? "..." : "")),
@@ -146,7 +176,8 @@ export async function POST(req: Request) {
         model_used: model,
         result_raw: result,
         result_json: null,
-      });
+      }).select();
+      createdReport = inserted?.[0];
 
     } else if (tool_type === "automation") {
       const fw = framework || "playwright";
@@ -175,7 +206,7 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      await supabase.from("qa_reports").insert({
+      const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
         type: "automation",
         title: "Automação " + fw.charAt(0).toUpperCase() + fw.slice(1) + " — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
@@ -184,7 +215,8 @@ export async function POST(req: Request) {
         model_used: model,
         result_raw: result,
         result_json: null,
-      });
+      }).select();
+      createdReport = inserted?.[0];
 
     } else if (tool_type === "consolidated_report") {
       // Gera relatório consolidado de todos os relatórios salvos
@@ -224,7 +256,7 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      await supabase.from("qa_reports").insert({
+      const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
         type: "consolidated_report",
         title: "Relatório Executivo Consolidado — " + new Date().toLocaleDateString("pt-BR"),
@@ -233,13 +265,14 @@ export async function POST(req: Request) {
         model_used: model,
         result_raw: result,
         result_json: null,
-      });
+      }).select();
+      createdReport = inserted?.[0];
 
     } else {
       return NextResponse.json({ error: "Invalid tool_type" }, { status: 400 });
     }
 
-    return NextResponse.json({ result });
+    return NextResponse.json({ result, report: createdReport });
 
   } catch (error: any) {
     console.error("QA API error:", error);

@@ -86,12 +86,13 @@ function InlineMarkdown({ text }: { text: string }) {
 }
 
 const MODELS = [
-  { key: "auto-free", label: "Automático (Melhor Gratuito)", provider: "OpenRouter" },
-  { key: "kimi-k2", label: "Kimi K2", provider: "Moonshot AI" },
-  { key: "nemotron-70b", label: "Nvidia Nemotron 70B", provider: "Nvidia" },
-  { key: "qwen-coder", label: "Qwen 2.5 Coder", provider: "Alibaba" },
-  { key: "laguna-xs", label: "Laguna XS", provider: "Poolside" },
+  { key: "auto-free", label: "Automático (Recomendado)", provider: "OpenRouter" },
+  { key: "nemotron-super", label: "Nemotron 3 Super", provider: "Nvidia" },
+  { key: "laguna-xs", label: "Laguna XS 2.1", provider: "Poolside" },
+  { key: "gpt-oss", label: "GPT OSS 20B", provider: "OpenAI" },
   { key: "cohere-north", label: "North Mini Code", provider: "Cohere" },
+  { key: "qwen-coder", label: "Qwen 2.5 Coder", provider: "Alibaba" },
+  { key: "kimi-k2", label: "Kimi K2 (Legado)", provider: "Moonshot AI" },
 ];
 
 interface ChatSidebarProps {
