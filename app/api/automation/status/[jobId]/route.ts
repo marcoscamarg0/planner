@@ -10,11 +10,12 @@ export const runtime = 'nodejs';
 
 export async function GET(
   _req: Request,
-  { params }: { params: { jobId: string } }
+  { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
+    const resolvedParams = await params;
     const queue = getQueue();
-    const job = await queue.getJob(params.jobId);
+    const job = await queue.getJob(resolvedParams.jobId);
 
     if (!job) {
       return NextResponse.json({ error: 'Job não encontrado' }, { status: 404 });
@@ -36,7 +37,7 @@ export async function GET(
     };
 
     return NextResponse.json({
-      jobId:     params.jobId,
+      jobId:     resolvedParams.jobId,
       jobName:   job.data.jobName,
       targetUrl: job.data.targetUrl,
       totalSteps: job.data.scriptSteps.length,
