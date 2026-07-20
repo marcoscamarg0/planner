@@ -216,16 +216,37 @@ async function runStep(
     // Highlight visual + screenshot
     await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
-      const old = { shadow: el.style.boxShadow, outline: el.style.outline };
-      el.style.boxShadow = '0 0 0 5px #ef4444, 0 0 20px rgba(239, 68, 68, 0.8)';
-      el.style.outline = '5px solid #ef4444';
+      const old = { shadow: el.style.boxShadow, outline: el.style.outline, transition: el.style.transition };
+      el.style.transition = 'none';
+      el.style.boxShadow = '0 0 0 6px #ef4444, 0 0 25px rgba(239, 68, 68, 1) !important';
+      el.style.outline = '6px solid #ef4444 !important';
       el.style.outlineOffset = '2px';
       return old;
     }).catch(() => null);
 
     await page.waitForTimeout(400);
-    // Take screenshot of the entire page viewport (gives context) instead of just the tiny element
-    const buf = await page.screenshot({ type: 'jpeg', quality: 65, timeout: 4000 }).catch(() => null);
+
+    // Get bounding box for clipping with context (padding)
+    const box = await locator.boundingBox().catch(() => null);
+    let clipOptions = undefined;
+    if (box) {
+      const padding = 250; // 250px of context around the element
+      const vp = page.viewportSize() || { width: 1280, height: 800 };
+      clipOptions = {
+        x: Math.max(0, box.x - padding),
+        y: Math.max(0, box.y - padding),
+        width: Math.min(vp.width - Math.max(0, box.x - padding), box.width + padding * 2),
+        height: Math.min(vp.height - Math.max(0, box.y - padding), box.height + padding * 2),
+      };
+    }
+
+    const buf = await page.screenshot({ 
+      type: 'jpeg', 
+      quality: 75, 
+      timeout: 4000,
+      clip: clipOptions 
+    }).catch(() => null);
+    
     if (buf) screenshotBase64 = (buf as Buffer).toString('base64');
 
     if (originalStyle) {
