@@ -456,6 +456,7 @@ export function AutoWebTab() {
     const element = document.getElementById(elementId);
     if (!element) return;
     try {
+      // @ts-expect-error - html2pdf.js types are missing
       const html2pdf = (await import("html2pdf.js")).default;
       const opt = {
         margin: 15,
