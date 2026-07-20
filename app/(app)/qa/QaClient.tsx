@@ -530,7 +530,7 @@ export function QaClient({ projects }: QaClientProps) {
     if (violations.length === 0) {
       const lines = text.split("\n");
       let currentViol: Partial<ParsedViolation> | null = null;
-      lines.forEach(line => {
+      for (const line of lines) {
         const trimmed = line.trim();
         if (/^\d+\.\s+/.test(trimmed)) {
           if (currentViol && currentViol.title) violations.push(currentViol as ParsedViolation);
@@ -548,7 +548,7 @@ export function QaClient({ projects }: QaClientProps) {
         } else if (trimmed.includes("Justificativa eMAG:") && currentViol) {
           currentViol.solution = "Corrija problemas de semântica ou descrições aria.";
         }
-      });
+      }
       if (currentViol && currentViol.title) {
         violations.push(currentViol as ParsedViolation);
       }
