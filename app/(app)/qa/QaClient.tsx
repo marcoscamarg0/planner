@@ -29,9 +29,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AutoWebTab } from "@/components/qa/AutoWebTab";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
-
 
 const MODELS = [
   { key: "auto-free", label: "Automático (Recomendado)", provider: "OpenRouter", badge: "Gratuito" },
@@ -76,14 +74,14 @@ const CATEGORY_COLOR: Record<string, string> = {
 const TYPE_LABEL: Record<string, string> = {
   test_cases: "Casos de Teste",
   test_report: "Relatório",
-  automation: "Automação",
+  smart_runner: "Runner Inteligente",
   consolidated_report: "Relatório Executivo",
 };
 
 const TYPE_COLOR: Record<string, string> = {
   test_cases: "text-sky-400 bg-sky-400/10",
   test_report: "text-violet-400 bg-violet-400/10",
-  automation: "text-emerald-400 bg-emerald-400/10",
+  smart_runner: "text-emerald-400 bg-emerald-400/10",
   consolidated_report: "text-amber-400 bg-amber-400/10",
 };
 
@@ -99,13 +97,13 @@ interface QaReport {
   result_json: any; created_at: string;
 }
 
-type ToolTab = "test_cases" | "test_report" | "automation" | "auto_web" | "smart_runner";
+type ToolTab = "test_cases" | "test_report" | "smart_runner";
 
 
 interface QaClientProps { projects: Project[]; }
 
 export function QaClient({ projects }: QaClientProps) {
-  const [activeTab, setActiveTab] = useState<ToolTab>("automation");
+  const [activeTab, setActiveTab] = useState<ToolTab>("smart_runner");
   const [selectedModel, setSelectedModel] = useState("auto-free");
   const [selectedFramework, setSelectedFramework] = useState("playwright");
   const [input, setInput] = useState("");
@@ -467,8 +465,6 @@ export function QaClient({ projects }: QaClientProps) {
 
   const tabs = [
     { key: "smart_runner" as ToolTab, label: "🤖 Runner IA",  icon: Zap,        desc: "URL + descrição → IA gera o script → executa → PDF" },
-    { key: "auto_web" as ToolTab,    label: "Auto Web 🚀",   icon: Code2,      desc: "Cole uma URL ou HTML e receba um script completo pronto para rodar" },
-    { key: "automation" as ToolTab,  label: "Automação",    icon: Code2,      desc: "Anexe o HTML e gere scripts prontos para Playwright, Cypress ou Selenium" },
     { key: "test_cases" as ToolTab,  label: "Casos de Teste",icon: FlaskConical,desc: "Gere suítes de teste a partir de um requisito ou funcionalidade" },
     { key: "test_report" as ToolTab, label: "Relatório",    icon: FileText,   desc: "Documente resultados em um relatório profissional" },
   ];
@@ -861,8 +857,6 @@ export function QaClient({ projects }: QaClientProps) {
   };
 
   const PLACEHOLDERS: Record<ToolTab, string> = {
-    auto_web: "Cole uma URL ou faça upload do HTML para gerar a automação completa.",
-    automation: "Descreva o fluxo a ser automatizado...\n\nExemplo: Login bem-sucedido com credenciais válidas, verificando redirecionamento para o dashboard e exibição do nome do usuário.\n\nSe anexar o HTML da página, a IA usará os seletores reais dos elementos.",
     test_cases: "Descreva a funcionalidade a ser testada...\n\nExemplo: Tela de login com e-mail e senha. O usuário pode recuperar a senha. Após 5 tentativas erradas, a conta é bloqueada por 10 minutos.",
     test_report: "Descreva o que foi testado e os resultados encontrados...\n\nExemplo: Testamos o fluxo de login. 2 bugs críticos encontrados: tela branca ao tentar login com e-mail inválido e botão de recuperação sem feedback visual.",
     smart_runner: "Cole uma URL para executar testes automatizados e gerar relatórios completos em background...",
@@ -991,8 +985,6 @@ export function QaClient({ projects }: QaClientProps) {
         {/* Smart Runner — full-page tab */}
         {activeTab === "smart_runner" ? (
           <SmartRunnerTab />
-        ) : activeTab === "auto_web" ? (
-          <AutoWebTab />
         ) : (
 
         <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
@@ -1120,7 +1112,16 @@ export function QaClient({ projects }: QaClientProps) {
                 </div>
               </motion.div>
             )}
+              </motion.div>
+            )}
           </AnimatePresence>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === "smart_runner" ? (
+          <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} />
+        ) : (
+          <div className="max-w-5xl mx-auto px-6 pb-6 space-y-6">
 
           {/* Input Area */}
           <div className="glass rounded-2xl border border-border p-5 space-y-4">
@@ -1197,73 +1198,8 @@ export function QaClient({ projects }: QaClientProps) {
               )}
             </div>
 
-            {/* Framework + HTML file selector (automation only) */}
-            <AnimatePresence>
-              {activeTab === "automation" && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="space-y-3"
-                >
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-xs text-muted-foreground font-medium">Framework:</span>
-                    {FRAMEWORKS.map(f => (
-                      <button
-                        key={f.key}
-                        onClick={() => setSelectedFramework(f.key)}
-                        className={cn(
-                          "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
-                          selectedFramework === f.key
-                            ? "bg-primary/15 text-primary border-primary/30"
-                            : "text-muted-foreground border-border hover:border-primary/30 hover:text-foreground"
-                        )}
-                      >
-                        <Code2 className="w-3 h-3" />
-                        {f.label}
-                        <span className="text-[10px] opacity-60">{f.lang}</span>
-                      </button>
-                    ))}
-                  </div>
+            {/* HTML file selector removed */}
 
-                  {/* HTML File upload */}
-                  <div className="flex items-center gap-3">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".html,.htm"
-                      className="hidden"
-                      onChange={e => setHtmlFile(e.target.files?.[0] ?? null)}
-                    />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className={cn(
-                        "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium border transition-all",
-                        htmlFile
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                          : "border-border text-muted-foreground hover:text-foreground hover:border-primary/30"
-                      )}
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      {htmlFile ? `📄 ${htmlFile.name}` : "Anexar HTML da página (opcional)"}
-                    </button>
-                    {htmlFile && (
-                      <button onClick={() => { setHtmlFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
-                        className="text-muted-foreground hover:text-destructive transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                    {htmlFile && (
-                      <span className="text-xs text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        IA vai usar os seletores reais do HTML
-                      </span>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             <div className="flex justify-end">
               <button

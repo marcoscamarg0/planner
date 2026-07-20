@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe, Zap, Loader2, FileDown, Eye, CheckCircle2,
@@ -94,7 +94,7 @@ function StepBadge({ status }: { status: StepResult["status"] }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Componente principal
 // ──────────────────────────────────────────────────────────────────────────────
-export function SmartRunnerTab() {
+export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | null }) {
   const [targetUrl, setTargetUrl]         = useState("");
   const [flowDescription, setFlowDescription] = useState("");
   const [jobName, setJobName]             = useState("");
@@ -112,6 +112,17 @@ export function SmartRunnerTab() {
 
   const [contextImages, setContextImages] = useState<string[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+
+  // Initialize with history report if provided
+  useEffect(() => {
+    if (initialReport) {
+      setResult(initialReport);
+      setTargetUrl(initialReport.targetUrl || "");
+      setJobName(initialReport.jobName || "");
+      setPhase("done");
+      setShowSteps(true);
+    }
+  }, [initialReport]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -222,7 +233,14 @@ export function SmartRunnerTab() {
         }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {
+        throw new Error("Erro no servidor (a resposta não é um JSON válido). O processo pode ter estourado a memória ou o limite de tempo no Render. Resposta: " + text.substring(0, 100));
+      }
+
       if (!res.ok) throw new Error(data.error || "Falha na execução");
 
       setResult(data);
