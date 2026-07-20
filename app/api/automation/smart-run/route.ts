@@ -217,14 +217,15 @@ async function runStep(
     await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
       const old = { shadow: el.style.boxShadow, outline: el.style.outline };
-      el.style.boxShadow = 'inset 0 0 0 3px #6d28d9, 0 0 12px 3px rgba(109,40,217,0.5)';
-      el.style.outline = '3px solid #6d28d9';
-      el.style.outlineOffset = '3px';
+      el.style.boxShadow = '0 0 0 5px #ef4444, 0 0 20px rgba(239, 68, 68, 0.8)';
+      el.style.outline = '5px solid #ef4444';
+      el.style.outlineOffset = '2px';
       return old;
     }).catch(() => null);
 
-    await page.waitForTimeout(300);
-    const buf = await locator.screenshot({ timeout: 4000 }).catch(() => null);
+    await page.waitForTimeout(400);
+    // Take screenshot of the entire page viewport (gives context) instead of just the tiny element
+    const buf = await page.screenshot({ type: 'jpeg', quality: 65, timeout: 4000 }).catch(() => null);
     if (buf) screenshotBase64 = (buf as Buffer).toString('base64');
 
     if (originalStyle) {
