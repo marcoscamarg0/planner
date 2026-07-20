@@ -370,7 +370,7 @@ Gere um script de automação completo em ${lang} que:
 
 Retorne APENAS o código do script sem nenhum bloco markdown.`;
 
-    scriptContent = await callOpenRouter(
+    const scriptContent = await callOpenRouter(
       [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
       model, apiKey
     );
@@ -401,7 +401,7 @@ O relatório deve conter:
 Script gerado:
 ${scriptContent.slice(0, 3000)}`;
 
-    reportContent = await callOpenRouter(
+    const reportContent = await callOpenRouter(
       [
         { role: "system", content: "Você é um líder de QA especialista em documentação. Escreva em português, formal e detalhado." },
         { role: "user", content: reportPrompt }
