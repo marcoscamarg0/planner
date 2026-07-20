@@ -38,7 +38,8 @@ function buildAreaData(tasks: Task[]) {
 
   const byDate: Record<string, { total: number; done: number }> = {};
   tasks.forEach((t) => {
-    const day = t.created_at.slice(0, 10);
+    const createdAt = t.created_at || new Date().toISOString();
+    const day = createdAt.slice(0, 10);
     if (!byDate[day]) byDate[day] = { total: 0, done: 0 };
     byDate[day].total++;
     if (t.status === "done") byDate[day].done++;

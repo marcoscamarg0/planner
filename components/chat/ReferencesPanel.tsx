@@ -54,6 +54,35 @@ export function ReferencesPanel() {
 
   useEffect(() => {
     loadReferences();
+    
+    // Auto-seed transport references
+    const hasSeeded = localStorage.getItem("seeded_transport_refs");
+    if (!hasSeeded) {
+      const seedRefs = async () => {
+        try {
+          await fetch("/api/references", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "link", url: "https://www.gov.br/transportes/pt-br", title: "Ministério dos Transportes - Site Oficial" }),
+          });
+          await fetch("/api/references", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "text", title: "Novo PAC - Transportes", content: "O Novo Programa de Aceleração do Crescimento (Novo PAC) prevê um eixo focado em Transporte Eficiente e Sustentável, priorizando investimentos em ferrovias e rodovias para integrar o Brasil de forma mais segura e sustentável." }),
+          });
+          await fetch("/api/references", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "text", title: "Missão do Ministério dos Transportes", content: "Formular, coordenar e supervisionar as políticas nacionais de transportes ferroviário e rodoviário, visando ao desenvolvimento sustentável." }),
+          });
+          localStorage.setItem("seeded_transport_refs", "true");
+          loadReferences();
+        } catch (e) {
+          console.error("Error seeding references", e);
+        }
+      };
+      seedRefs();
+    }
   }, []);
 
   const resetForm = () => {
@@ -261,7 +290,7 @@ export function ReferencesPanel() {
           </div>
         ) : (
           references.map((ref) => {
-            const meta = TYPE_META[ref.type];
+            const meta = TYPE_META[ref.type as KnowledgeSourceType] || TYPE_META.link;
             const Icon = meta.icon;
             return (
               <div

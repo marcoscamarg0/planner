@@ -70,6 +70,19 @@ export function ProjectEditorClient({
     }
   };
 
+  const deletePage = async (pageId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta página?")) return;
+    
+    const supabase = createClient();
+    await supabase.from("pages").delete().eq("id", pageId);
+    
+    setPages(prev => prev.filter(p => p.id !== pageId));
+    if (selectedPage?.id === pageId) {
+      setSelectedPage(pages.find(p => p.id !== pageId) || null);
+    }
+  };
+
   const savePage = useCallback(
     async (content: Record<string, unknown>) => {
       if (!selectedPage) return;
@@ -169,22 +182,7 @@ export function ProjectEditorClient({
 
   const handleExportPDF = async () => {
     try {
-      const element = document.getElementById("pdf-export-area");
-      if (!element) return;
-      
-      // Dynamic import to avoid SSR issues
-      // @ts-ignore
-      const html2pdf = (await import("html2pdf.js")).default;
-      
-      const opt = {
-        margin: 10,
-        filename: `${project.title || 'relatorio'}-dashboard.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-      
-      html2pdf().set(opt).from(element).save();
+      window.print();
     } catch (e) {
       console.error("Erro ao gerar PDF:", e);
       alert("Não foi possível gerar o PDF. Verifique o console.");
@@ -262,23 +260,36 @@ export function ProjectEditorClient({
 
           <AnimatePresence>
             {pages.map((page) => (
-              <motion.button
+              <motion.div
                 key={page.id}
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -8 }}
-                onClick={() => setSelectedPage(page)}
-                className={cn(
-                  "w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left text-xs transition-all",
-                  selectedPage?.id === page.id
-                    ? "bg-primary/15 text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                )}
-                aria-current={selectedPage?.id === page.id ? "page" : undefined}
+                className="group relative"
               >
-                <FileText className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span className="truncate">{page.title}</span>
-              </motion.button>
+                <button
+                  onClick={() => setSelectedPage(page)}
+                  className={cn(
+                    "w-full flex items-center justify-between gap-2 px-2 py-2 rounded-lg text-left text-xs transition-all",
+                    selectedPage?.id === page.id
+                      ? "bg-primary/15 text-foreground pr-8"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent pr-8"
+                  )}
+                  aria-current={selectedPage?.id === page.id ? "page" : undefined}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <FileText className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{page.title}</span>
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => deletePage(page.id, e)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-all z-10"
+                  title="Apagar página"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </motion.div>
             ))}
           </AnimatePresence>
 

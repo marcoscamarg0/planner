@@ -1,0 +1,49 @@
+services:
+  # ── Serviço Web (Next.js) ──────────────────────────────────────────────────
+  - type: web
+    name: planner-web
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        fromService:
+          name: planner-redis
+          type: redis
+          property: connectionString
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+  # ── Worker BullMQ (processo separado) ─────────────────────────────────────
+  - type: worker
+    name: planner-worker
+    runtime: node
+    plan: starter
+    buildCommand: >
+      npm install &&
+      npx playwright install chromium --with-deps &&
+      npx tsc --project tsconfig.worker.json
+    startCommand: node dist/lib/worker/worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        fromService:
+          name: planner-redis
+          type: redis
+          property: connectionString
+
+  # ── Redis Gerenciado ───────────────────────────────────────────────────────
+  - type: redis
+    name: planner-redis
+    plan: free
+    maxmemoryPolicy: noeviction

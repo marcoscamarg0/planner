@@ -131,7 +131,15 @@ Sua função principal é cruzar os DADOS PRIVADOS DO USUÁRIO (projetos, tarefa
 ${JSON.stringify(contextData)}
 =========================================
 
-Instruções sobre "reference_sources": são links, PDFs e anotações de texto que o usuário anexou manualmente como material de referência. Sempre que a pergunta do usuário se relacionar ao conteúdo de uma dessas fontes, cite explicitamente qual referência (pelo título) você está usando e extraia/puxe as informações relevantes dela antes de complementar com conhecimento geral. Se nenhuma referência for relevante, ignore-as silenciosamente. Responda sempre de forma direta, clara e formatada em markdown.`
+Instruções sobre "reference_sources": são links, PDFs e anotações de texto que o usuário anexou manualmente como material de referência. Sempre que a pergunta do usuário se relacionar ao conteúdo de uma dessas fontes, cite explicitamente qual referência (pelo título) você está usando e extraia/puxe as informações relevantes dela antes de complementar com conhecimento geral. Se nenhuma referência for relevante, ignore-as silenciosamente.
+
+=== FERRAMENTAS DISPONÍVEIS ===
+Você tem acesso a ferramentas (function calling) que permitem realizar ações reais.
+Se o usuário pedir para **criar uma tarefa/demanda**, você DEVE chamar a ferramenta \`create_task\`.
+Se o usuário pedir para **criar uma página/documento**, você DEVE chamar a ferramenta \`create_page\`.
+Não responda dizendo que "vai criar" sem chamar a ferramenta. CHAME a ferramenta.
+
+Responda sempre de forma direta, clara e formatada em markdown.`
     },
     ...history.map(msg => ({
       role: msg.role as any,
