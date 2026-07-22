@@ -524,8 +524,8 @@ export function AutoWebTab() {
     : "automation.spec.ts";
 
   // Dashboard Renderer Component
-  const ReportDashboard = ({ reportText, scriptText, title, urlTested, date, fwName, reportId, isHistory, screenshots }: {
-    reportText: string, scriptText: string, title: string, urlTested: string, date: string, fwName: string, reportId: string, isHistory: boolean, screenshots?: {label: string, base64: string}[]
+  const ReportDashboard = ({ reportText, scriptText, title, urlTested, date, fwName, reportId, isHistory, screenshots, steps }: {
+    reportText: string, scriptText: string, title: string, urlTested: string, date: string, fwName: string, reportId: string, isHistory: boolean, screenshots?: {label: string, base64: string}[], steps?: RunnerStepResult[]
   }) => {
     const metrics = parseMetrics(reportText);
     const recs = parseRecommendations(reportText);
@@ -617,6 +617,26 @@ export function AutoWebTab() {
               </div>
             `).join("")}
           </div>
+        ` : ""}
+        
+        ${steps && steps.length > 0 ? `
+          <h2>Passos Executados</h2>
+          <table border="1" style="border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 15px; border-color: #cbd5e1;">
+            <tr style="background-color: #f1f5f9;">
+              <th style="padding: 6px; text-align: left;">Passo</th>
+              <th style="padding: 6px; text-align: left;">Ação</th>
+              <th style="padding: 6px; text-align: left;">Status</th>
+              <th style="padding: 6px; text-align: left;">Detalhe</th>
+            </tr>
+            ${steps.map(s => `
+              <tr>
+                <td style="padding: 6px;">#${s.index}</td>
+                <td style="padding: 6px;">${s.label}</td>
+                <td style="padding: 6px;">${s.status}</td>
+                <td style="padding: 6px;">${s.detalhe}</td>
+              </tr>
+            `).join("")}
+          </table>
         ` : ""}
       </body>
       </html>`;
@@ -759,6 +779,40 @@ export function AutoWebTab() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Steps List */}
+          {steps && steps.length > 0 && (
+            <div className="space-y-4 pt-4 border-t border-slate-200">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-primary" />
+                Execução do Script (Passo a Passo)
+              </h3>
+              <div className="space-y-2">
+                {steps.map((step, idx) => {
+                   const statusMap = {
+                     aprovado:     { color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', icon: '✓' },
+                     falha_clique: { color: 'text-amber-600',  bg: 'bg-amber-50 border-amber-200',  icon: '⚡' },
+                     erro_js:      { color: 'text-rose-600',   bg: 'bg-rose-50 border-rose-200',   icon: '✖' },
+                     sem_texto:    { color: 'text-rose-600',   bg: 'bg-rose-50 border-rose-200',   icon: '⚠' },
+                     pulado:       { color: 'text-slate-500', bg: 'bg-slate-50 border-slate-200', icon: '⊘' },
+                   };
+                   const st = statusMap[step.status] || statusMap.pulado;
+                   return (
+                    <div key={idx} className={cn("border rounded-xl p-3 flex flex-col sm:flex-row gap-3 items-start", st.bg)}>
+                      <div className={cn("font-bold text-sm shrink-0 w-8 flex items-center justify-center rounded-full h-8 bg-white border shadow-sm", st.color)}>
+                        {st.icon}
+                      </div>
+                      <div className="flex-1 text-xs space-y-1">
+                        <p className="font-bold text-slate-800 uppercase tracking-wide">Passo #{step.index} — {step.label}</p>
+                        <p className="text-slate-600 bg-white p-2 border rounded-lg font-mono text-[10px] break-all">{step.detalhe}</p>
+                      </div>
+                      {step.duration && <span className="text-[10px] text-slate-500 font-mono mt-1 sm:mt-0">{step.duration}ms</span>}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1390,6 +1444,7 @@ export function AutoWebTab() {
                           label: `Passo #${s.index} - ${s.label}`,
                           base64: `data:image/jpeg;base64,${s.screenshotBase64}`
                         }))}
+                        steps={runnerResult.steps || []}
                     />
                   </div>
                 )}
