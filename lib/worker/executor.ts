@@ -89,7 +89,8 @@ async function executeStep(
     await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
 
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
-      const old = { shadow: el.style.boxShadow, outline: el.style.outline };
+      const old = { shadow: el.style.boxShadow, outline: el.style.outline, transition: el.style.transition };
+      el.style.transition = 'none';
       el.style.boxShadow = 'inset 0 0 0 3px red, 0 0 10px 2px rgba(255,0,0,0.5)';
       el.style.outline = '3px solid red';
       el.style.outlineOffset = '2px';
@@ -97,11 +98,12 @@ async function executeStep(
     }).catch(() => null);
 
     await page.waitForTimeout(250);
-    const buf = await locator.screenshot({ timeout: 3000 }).catch(() => null);
+    const buf = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 3000 }).catch(() => null);
     if (buf) screenshotBase64 = buf.toString('base64');
 
     if (originalStyle) {
       await locator.evaluate((el: HTMLElement, old: any) => {
+        el.style.transition = old.transition || '';
         el.style.boxShadow = old.shadow || '';
         el.style.outline = old.outline || '';
       }, originalStyle).catch(() => {});
@@ -221,23 +223,6 @@ export async function executeAutomation(
     fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
 
     let pdfUrl: string | undefined;
-    try {
-      const pdfPage = await context.newPage();
-      await pdfPage.setContent(htmlContent, { waitUntil: 'networkidle', timeout: 30000 });
-      const pdfFilename = `report-${jobId}.pdf`;
-      const pdfPath = path.join(reportsDir, pdfFilename);
-      await pdfPage.pdf({
-        path: pdfPath,
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
-      });
-      await pdfPage.close();
-      pdfUrl = `/reports/${pdfFilename}`;
-      console.log(`[Executor] 🎉 PDF gerado: ${pdfPath}`);
-    } catch (pdfErr) {
-      console.warn('[Executor] PDF falhou, HTML salvo:', htmlPath, pdfErr);
-    }
 
     await context.close();
 

@@ -524,12 +524,14 @@ export function AutoWebTab() {
     : "automation.spec.ts";
 
   // Dashboard Renderer Component
-  const ReportDashboard = ({ reportText, scriptText, title, urlTested, date, fwName, reportId, isHistory }: {
-    reportText: string, scriptText: string, title: string, urlTested: string, date: string, fwName: string, reportId: string, isHistory: boolean
+  const ReportDashboard = ({ reportText, scriptText, title, urlTested, date, fwName, reportId, isHistory, screenshots }: {
+    reportText: string, scriptText: string, title: string, urlTested: string, date: string, fwName: string, reportId: string, isHistory: boolean, screenshots?: {label: string, base64: string}[]
   }) => {
     const metrics = parseMetrics(reportText);
     const recs = parseRecommendations(reportText);
     const viols = parseViolations(reportText);
+    
+    const shotsToUse = screenshots || liveScreenshots;
 
     const exportToWord = () => {
       const element = document.getElementById("pdf-dashboard-content");
@@ -605,10 +607,10 @@ export function AutoWebTab() {
           </div>
         `).join("")}
 
-        ${liveScreenshots.length > 0 ? `
+        ${shotsToUse.length > 0 ? `
           <h2>Evidências Visuais Capturadas</h2>
           <div class="gallery-grid">
-            ${liveScreenshots.map((shot, idx) => `
+            ${shotsToUse.map((shot, idx) => `
               <div class="gallery-item">
                 <p><strong>${shot.label || `Evidência #${idx + 1}`}</strong></p>
                 <img src="${shot.base64}" style="max-width: 100%; max-height: 250px;" />
@@ -740,14 +742,14 @@ export function AutoWebTab() {
           </div>
 
           {/* Clean Screenshot Evidence Gallery */}
-          {liveScreenshots.length > 0 && (
+          {shotsToUse.length > 0 && (
             <div className="space-y-4 pt-4 border-t border-slate-200">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
                 <Eye className="w-4 h-4 text-primary" />
                 Capturas de Tela e Evidências Visuais
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {liveScreenshots.map((shot, idx) => (
+                {shotsToUse.map((shot, idx) => (
                   <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col shadow-sm">
                     <div className="bg-slate-100 px-3 py-1 text-[10px] font-bold text-slate-500 border-b border-slate-200">
                       {shot.label || `Evidência #${idx + 1}`}
@@ -1372,20 +1374,23 @@ export function AutoWebTab() {
                   </div>
                 )}
 
-                {/* Metrics Summary when completed */}
+                {/* Report Dashboard when completed */}
                 {runnerStatus === 'completed' && runnerResult && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      { label: 'Total', value: runnerResult.totalSteps ?? runnerSteps.length, color: 'text-primary', bg: 'bg-primary/10' },
-                      { label: 'Aprovados', value: runnerResult.approvedSteps ?? 0, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
-                      { label: 'Falhas', value: runnerResult.failedSteps ?? 0, color: 'text-rose-400', bg: 'bg-rose-400/10' },
-                      { label: 'Violações eMAG', value: runnerResult.axeViolationsCount ?? 0, color: 'text-amber-400', bg: 'bg-amber-400/10' },
-                    ].map(m => (
-                      <div key={m.label} className={cn('rounded-xl p-4 text-center', m.bg)}>
-                        <p className={cn('text-2xl font-bold', m.color)}>{m.value}</p>
-                        <p className="text-xs text-muted-foreground mt-1 font-medium uppercase tracking-wide">{m.label}</p>
-                      </div>
-                    ))}
+                  <div className="mt-4 bg-accent/5 rounded-2xl border border-border p-4">
+                    <ReportDashboard 
+                        reportText={runnerResult.reportMarkdown || ""}
+                        scriptText={result?.script || ""}
+                        title={projectName || "Relatório Automatizado"}
+                        urlTested={url}
+                        date={runnerResult.completedAt || new Date().toISOString()}
+                        fwName={framework}
+                        reportId={runnerJobId || "new"}
+                        isHistory={false}
+                        screenshots={(runnerResult.steps || []).filter(s => s.screenshotBase64).map(s => ({
+                          label: `Passo #${s.index} - ${s.label}`,
+                          base64: `data:image/jpeg;base64,${s.screenshotBase64}`
+                        }))}
+                    />
                   </div>
                 )}
 
