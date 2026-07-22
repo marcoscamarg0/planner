@@ -23,6 +23,8 @@ export async function GET(
 
     const state = await job.getState();
     const progress = (job.progress as number) || 0;
+    const logData = await queue.getJobLogs(resolvedParams.jobId, 0, -1);
+    const logs = logData.logs || [];
     const returnValue = job.returnvalue;
     const failedReason = job.failedReason;
 
@@ -44,6 +46,7 @@ export async function GET(
       status:    state,
       statusLabel: stateLabel[state] || state,
       progress,
+      logs,
       // Dados do resultado (quando concluído)
       pdfUrl:           returnValue?.pdfUrl || null,
       htmlReportUrl:    returnValue?.htmlReportUrl || null,

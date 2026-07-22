@@ -227,6 +227,7 @@ export function AutoWebTab() {
   const [runnerSteps, setRunnerSteps]       = useState<RunnerStep[]>([]);
   const [runnerResult, setRunnerResult]     = useState<RunnerResult | null>(null);
   const [runnerError, setRunnerError]       = useState<string | null>(null);
+  const [runnerLogs, setRunnerLogs]         = useState<string[]>([]);
   const [runnerExpanded, setRunnerExpanded] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -243,6 +244,7 @@ export function AutoWebTab() {
     setRunnerSteps([]);
     setRunnerResult(null);
     setRunnerError(null);
+    setRunnerLogs([]);
     setRunnerExpanded(true);
 
     try {
@@ -269,6 +271,7 @@ export function AutoWebTab() {
           const statusData = await statusRes.json();
 
           setRunnerProgress(statusData.progress || 0);
+          if (statusData.logs) setRunnerLogs(statusData.logs);
 
           if (statusData.status === 'completed') {
             stopPolling();
@@ -1425,6 +1428,20 @@ export function AutoWebTab() {
                       <AlertCircle className="w-4 h-4" /> Erro de execução
                     </p>
                     <p className="text-xs text-rose-400/80 mt-1 font-mono">{runnerError}</p>
+                  </div>
+                )}
+
+                {/* Live Logs Terminal */}
+                {runnerLogs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                      <Terminal className="w-4 h-4" /> Terminal do Servidor
+                    </p>
+                    <div className="bg-[#0f172a] rounded-xl p-4 overflow-x-auto overflow-y-auto max-h-[300px] border border-slate-800 shadow-inner flex flex-col flex-col-reverse">
+                      <pre className="text-[11px] font-mono leading-relaxed text-emerald-400/90 break-all whitespace-pre-wrap">
+                        {runnerLogs.join('\\n')}
+                      </pre>
+                    </div>
                   </div>
                 )}
 

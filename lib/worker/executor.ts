@@ -28,7 +28,8 @@ async function executeStep(
   page: Page,
   step: AutomationJobData['scriptSteps'][0],
   index: number,
-  targetUrl: string
+  targetUrl: string,
+  job: Job<AutomationJobData>
 ): Promise<StepResult> {
   const urlBase = targetUrl.split('#')[0].split('?')[0];
   const startTime = Date.now();
@@ -38,6 +39,7 @@ async function executeStep(
   try {
     const currentUrlBase = page.url().split('#')[0].split('?')[0];
     if (currentUrlBase !== urlBase && step.action !== 'goto') {
+      await job.log(`[Passo #${index}] Retornando à URL base: ${targetUrl}`);
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
   } catch { /* ignore, prosseguir */ }
@@ -46,6 +48,7 @@ async function executeStep(
   let locator;
   try {
     if (step.action === 'goto') {
+      await job.log(`[Passo #${index}] Ação: GOTO -> ${step.value || targetUrl}`);
       await page.goto(step.value || targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       const buf = await page.screenshot({ type: 'jpeg', quality: 60 }).catch(() => null);
       if (buf) screenshotBase64 = buf.toString('base64');
@@ -57,6 +60,7 @@ async function executeStep(
     }
 
     if (step.action === 'wait') {
+      await job.log(`[Passo #${index}] Ação: WAIT -> ${step.milliseconds || 1000}ms`);
       await page.waitForTimeout(step.milliseconds || 1000);
       return {
         index, label: step.label, status: 'aprovado',
@@ -85,6 +89,8 @@ async function executeStep(
         locator = page.locator(step.selector || '*');
     }
 
+    await job.log(`[Passo #${index}] Localizando elemento: tipo='${step.selectorType}', seletor='${step.selector}', valor='${step.value}'`);
+
     // Scroll + highlight + screenshot de evidência
     await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
 
@@ -108,6 +114,8 @@ async function executeStep(
         el.style.outline = old.outline || '';
       }, originalStyle).catch(() => {});
     }
+
+    await job.log(`[Passo #${index}] Executando ação: ${step.action}`);
 
     // Executar ação
     if (step.action === 'type') {
@@ -133,9 +141,9 @@ async function executeStep(
 
     await page.waitForTimeout(800);
 
-    // Retornar à URL base se navegou para fora
-    const afterUrl = page.url().split('#')[0].split('?')[0];
-    if (afterUrl !== urlBase && step.action === 'click') {
+    // Retornar à URL base se for um clique (para limpar estado/popups)
+    if (step.action === 'click') {
+      await job.log(`[Passo #${index}] Retornando para a URL inicial para redefinir o estado...`);
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
 
@@ -147,6 +155,7 @@ async function executeStep(
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    await job.log(`[Passo #${index}] ❌ FALHA: ${msg.substring(0, 200)}`);
     return {
       index, label: step.label, status: 'falha_clique',
       detalhe: `Falha na execução: ${msg.substring(0, 200)}`,
@@ -191,12 +200,15 @@ export async function executeAutomation(
     });
 
     // Navegar para a URL alvo
+    await job.log(`[Executor] Iniciando navegador e acessando URL base: ${targetUrl}`);
     await job.updateProgress(8);
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Auditoria eMAG (Axe) — opcional
+    await job.log(`[Executor] Analisando acessibilidade da página inicial...`);
     await job.updateProgress(14);
     axeViolations = await runAxeAudit(page);
+    await job.log(`[Executor] ♿ Axe: ${axeViolations.length} violações de acessibilidade/WCAG encontradas.`);
     console.log(`[Executor] ♿ Axe: ${axeViolations.length} violações encontradas`);
 
     // Executar passos
@@ -206,12 +218,15 @@ export async function executeAutomation(
       const progress = 14 + Math.floor(((i + 1) / totalSteps) * 72);
       await job.updateProgress(progress);
 
-      console.log(`[Executor] Passo ${i + 1}/${totalSteps}: ${step.label}`);
-      const result = await executeStep(page, step, i + 1, targetUrl);
+      const msg = `[Executor] Passo ${i + 1}/${totalSteps}: ${step.label}`;
+      await job.log(msg);
+      console.log(msg);
+      const result = await executeStep(page, step, i + 1, targetUrl, job);
       results.push(result);
     }
 
     // Gerar Relatório HTML → PDF
+    await job.log(`[Executor] Todos os passos concluídos. Gerando relatório...`);
     await job.updateProgress(90);
     const htmlContent = buildReportHtml({ results, axeViolations, targetUrl, jobName });
 
@@ -228,6 +243,8 @@ export async function executeAutomation(
 
     const approved = results.filter(r => r.status === 'aprovado').length;
     const failed   = results.filter(r => r.status !== 'aprovado' && r.status !== 'pulado').length;
+
+    await job.log(`[Executor] ✅ Finalizado com ${approved} aprovados e ${failed} falhas.`);
 
     return {
       status: 'completed',
