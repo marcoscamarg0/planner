@@ -227,6 +227,7 @@ export function AutoWebTab() {
   const [runnerSteps, setRunnerSteps]       = useState<RunnerStep[]>([]);
   const [runnerResult, setRunnerResult]     = useState<RunnerResult | null>(null);
   const [runnerError, setRunnerError]       = useState<string | null>(null);
+  const [runnerLogs, setRunnerLogs]         = useState<string[]>([]);
   const [runnerExpanded, setRunnerExpanded] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -243,6 +244,7 @@ export function AutoWebTab() {
     setRunnerSteps([]);
     setRunnerResult(null);
     setRunnerError(null);
+    setRunnerLogs([]);
     setRunnerExpanded(true);
 
     try {
@@ -269,6 +271,7 @@ export function AutoWebTab() {
           const statusData = await statusRes.json();
 
           setRunnerProgress(statusData.progress || 0);
+          if (statusData.logs) setRunnerLogs(statusData.logs);
 
           if (statusData.status === 'completed') {
             stopPolling();
@@ -524,12 +527,14 @@ export function AutoWebTab() {
     : "automation.spec.ts";
 
   // Dashboard Renderer Component
-  const ReportDashboard = ({ reportText, scriptText, title, urlTested, date, fwName, reportId, isHistory }: {
-    reportText: string, scriptText: string, title: string, urlTested: string, date: string, fwName: string, reportId: string, isHistory: boolean
+  const ReportDashboard = ({ reportText, scriptText, title, urlTested, date, fwName, reportId, isHistory, screenshots, steps }: {
+    reportText: string, scriptText: string, title: string, urlTested: string, date: string, fwName: string, reportId: string, isHistory: boolean, screenshots?: {label: string, base64: string}[], steps?: RunnerStepResult[]
   }) => {
     const metrics = parseMetrics(reportText);
     const recs = parseRecommendations(reportText);
     const viols = parseViolations(reportText);
+    
+    const shotsToUse = screenshots || liveScreenshots;
 
     const exportToWord = () => {
       const element = document.getElementById("pdf-dashboard-content");
@@ -605,16 +610,36 @@ export function AutoWebTab() {
           </div>
         `).join("")}
 
-        ${liveScreenshots.length > 0 ? `
+        ${shotsToUse.length > 0 ? `
           <h2>Evidências Visuais Capturadas</h2>
           <div class="gallery-grid">
-            ${liveScreenshots.map((shot, idx) => `
+            ${shotsToUse.map((shot, idx) => `
               <div class="gallery-item">
                 <p><strong>${shot.label || `Evidência #${idx + 1}`}</strong></p>
                 <img src="${shot.base64}" style="max-width: 100%; max-height: 250px;" />
               </div>
             `).join("")}
           </div>
+        ` : ""}
+        
+        ${steps && steps.length > 0 ? `
+          <h2>Passos Executados</h2>
+          <table border="1" style="border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 15px; border-color: #cbd5e1;">
+            <tr style="background-color: #f1f5f9;">
+              <th style="padding: 6px; text-align: left;">Passo</th>
+              <th style="padding: 6px; text-align: left;">Ação</th>
+              <th style="padding: 6px; text-align: left;">Status</th>
+              <th style="padding: 6px; text-align: left;">Detalhe</th>
+            </tr>
+            ${steps.map(s => `
+              <tr>
+                <td style="padding: 6px;">#${s.index}</td>
+                <td style="padding: 6px;">${s.label}</td>
+                <td style="padding: 6px;">${s.status}</td>
+                <td style="padding: 6px;">${s.detalhe}</td>
+              </tr>
+            `).join("")}
+          </table>
         ` : ""}
       </body>
       </html>`;
@@ -740,14 +765,14 @@ export function AutoWebTab() {
           </div>
 
           {/* Clean Screenshot Evidence Gallery */}
-          {liveScreenshots.length > 0 && (
+          {shotsToUse.length > 0 && (
             <div className="space-y-4 pt-4 border-t border-slate-200">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
                 <Eye className="w-4 h-4 text-primary" />
                 Capturas de Tela e Evidências Visuais
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {liveScreenshots.map((shot, idx) => (
+                {shotsToUse.map((shot, idx) => (
                   <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col shadow-sm">
                     <div className="bg-slate-100 px-3 py-1 text-[10px] font-bold text-slate-500 border-b border-slate-200">
                       {shot.label || `Evidência #${idx + 1}`}
@@ -757,6 +782,40 @@ export function AutoWebTab() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Steps List */}
+          {steps && steps.length > 0 && (
+            <div className="space-y-4 pt-4 border-t border-slate-200">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-primary" />
+                Execução do Script (Passo a Passo)
+              </h3>
+              <div className="space-y-2">
+                {steps.map((step, idx) => {
+                   const statusMap = {
+                     aprovado:     { color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', icon: '✓' },
+                     falha_clique: { color: 'text-amber-600',  bg: 'bg-amber-50 border-amber-200',  icon: '⚡' },
+                     erro_js:      { color: 'text-rose-600',   bg: 'bg-rose-50 border-rose-200',   icon: '✖' },
+                     sem_texto:    { color: 'text-rose-600',   bg: 'bg-rose-50 border-rose-200',   icon: '⚠' },
+                     pulado:       { color: 'text-slate-500', bg: 'bg-slate-50 border-slate-200', icon: '⊘' },
+                   };
+                   const st = statusMap[step.status] || statusMap.pulado;
+                   return (
+                    <div key={idx} className={cn("border rounded-xl p-3 flex flex-col sm:flex-row gap-3 items-start", st.bg)}>
+                      <div className={cn("font-bold text-sm shrink-0 w-8 flex items-center justify-center rounded-full h-8 bg-white border shadow-sm", st.color)}>
+                        {st.icon}
+                      </div>
+                      <div className="flex-1 text-xs space-y-1">
+                        <p className="font-bold text-slate-800 uppercase tracking-wide">Passo #{step.index} — {step.label}</p>
+                        <p className="text-slate-600 bg-white p-2 border rounded-lg font-mono text-[10px] break-all">{step.detalhe}</p>
+                      </div>
+                      {step.duration && <span className="text-[10px] text-slate-500 font-mono mt-1 sm:mt-0">{step.duration}ms</span>}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1372,20 +1431,38 @@ export function AutoWebTab() {
                   </div>
                 )}
 
-                {/* Metrics Summary when completed */}
+                {/* Live Logs Terminal */}
+                {runnerLogs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                      <Terminal className="w-4 h-4" /> Terminal do Servidor
+                    </p>
+                    <div className="bg-[#0f172a] rounded-xl p-4 overflow-x-auto overflow-y-auto max-h-[300px] border border-slate-800 shadow-inner flex flex-col flex-col-reverse">
+                      <pre className="text-[11px] font-mono leading-relaxed text-emerald-400/90 break-all whitespace-pre-wrap">
+                        {runnerLogs.join('\\n')}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+
+                {/* Report Dashboard when completed */}
                 {runnerStatus === 'completed' && runnerResult && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      { label: 'Total', value: runnerResult.totalSteps ?? runnerSteps.length, color: 'text-primary', bg: 'bg-primary/10' },
-                      { label: 'Aprovados', value: runnerResult.approvedSteps ?? 0, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
-                      { label: 'Falhas', value: runnerResult.failedSteps ?? 0, color: 'text-rose-400', bg: 'bg-rose-400/10' },
-                      { label: 'Violações eMAG', value: runnerResult.axeViolationsCount ?? 0, color: 'text-amber-400', bg: 'bg-amber-400/10' },
-                    ].map(m => (
-                      <div key={m.label} className={cn('rounded-xl p-4 text-center', m.bg)}>
-                        <p className={cn('text-2xl font-bold', m.color)}>{m.value}</p>
-                        <p className="text-xs text-muted-foreground mt-1 font-medium uppercase tracking-wide">{m.label}</p>
-                      </div>
-                    ))}
+                  <div className="mt-4 bg-accent/5 rounded-2xl border border-border p-4">
+                    <ReportDashboard 
+                        reportText={runnerResult.reportMarkdown || ""}
+                        scriptText={result?.script || ""}
+                        title={projectName || "Relatório Automatizado"}
+                        urlTested={url}
+                        date={runnerResult.completedAt || new Date().toISOString()}
+                        fwName={framework}
+                        reportId={runnerJobId || "new"}
+                        isHistory={false}
+                        screenshots={(runnerResult.steps || []).filter(s => s.screenshotBase64).map(s => ({
+                          label: `Passo #${s.index} - ${s.label}`,
+                          base64: `data:image/jpeg;base64,${s.screenshotBase64}`
+                        }))}
+                        steps={runnerResult.steps || []}
+                    />
                   </div>
                 )}
 

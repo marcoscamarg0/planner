@@ -56,12 +56,13 @@ Regras:
         'X-Title': 'Planner QA Suite',
       },
       body: JSON.stringify({
-        model: 'openrouter/free',
+        model: 'google/gemini-2.0-flash-exp:free',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Traduz este script para rodar em ${targetUrl}:\n\n${scriptCode.substring(0, 12000)}` },
         ],
         temperature: 0.1,
+        max_tokens: 8000,
         response_format: { type: 'json_object' },
       }),
     });
