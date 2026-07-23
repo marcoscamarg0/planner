@@ -58,45 +58,41 @@ async function generateStepsFromDescription(
   };
   const llmModel = modelMap[model] || 'openrouter/auto';
 
-  const systemPrompt = `Você é um especialista em automação web com Playwright. 
-Dado uma URL e a descrição de um fluxo de teste, gere um array de passos de automação JSON.
+  const systemPrompt = `Você é um Engenheiro de Qualidade de Software (QA Automation Specialist) especialista em Playwright.
+Dado uma URL e a descrição ou CÓDIGO DE TESTE do usuário, gere um array de passos de automação em JSON.
 
-REGRAS OBRIGATÓRIAS:
-- GERE PASSOS EXTREMAMENTE DETALHADOS. Em vez de "Fazer login", divida a ação em: "Aguardar carregamento da página", "Clicar no campo de email", "Digitar email", "Clicar no campo de senha", "Digitar senha", "Clicar em Entrar", "Aguardar navegação".
-- Sempre comece com um passo "goto" para a URL fornecida
-- Use seletores reais e robustos (prefira role/text/css)
-- Inclua passos de verificação intermediários (como scroll ou wait)
-- Máximo de 30 passos
-- Seja extremamente descritivo nos labels (ex: "Clicar no botão primário de Login no canto superior direito")
+REGRAS ESSENCIAIS:
+1. SUPORTE A CÓDIGO PLAYWRIGHT: Se o usuário colar um script Playwright (ex: test(...), page.getByRole(...), page.getByTitle(...), page.locator(...), waitForEvent(...)), PARSEIE E CONVERTA CADA LINHA DE COMANDO DE TESTE EM UM PASSO DE AUTOMAÇÃO JSON NA ORDEM EXATA DO SCRIPT.
+2. MAPEAMENTO DE SELETORES DO CÓDIGO:
+   - page.getByRole('link', { name: 'X' }).click() => selectorType: "role", selector: "link", value: "X", action: "click", label: "Clicar no link X"
+   - page.getByRole('button', { name: 'Y' }).click() => selectorType: "role", selector: "button", value: "Y", action: "click", label: "Clicar no botão Y"
+   - page.getByTitle('Z').click() => selectorType: "css", selector: "[title='Z']", action: "click", label: "Clicar em Z"
+   - page.getByText('T').click() => selectorType: "text", value: "T", action: "click", label: "Clicar em T"
+   - page.waitForEvent('popup') + click() => marq isPopup: true
+3. PRESERVE TODOS OS PASSOS: Não omita nenhum comando fornecido no script do usuário.
+4. LABELS CLAROS E EXECUTIVOS: Crie descrições claras em português para cada passo (ex: "Clicar no link 'Iniciar'", "Acessar 'Outras Informações'").
 
-FORMATO de resposta (JSON puro, sem markdown):
+FORMATO DE RESPOSTA (JSON puro, sem markdown):
 {
   "steps": [
     {
       "action": "goto|click|type|wait|scroll|hover",
-      "label": "Descrição amigável do passo",
+      "label": "Descrição clara da ação",
       "selectorType": "role|text|css|id",
-      "selector": "button|link|[data-testid='x']|#id",
+      "selector": "button|link|[title='x']|#id",
       "value": "URL para goto, texto para type, nome para role/link",
       "milliseconds": 1000,
       "isPopup": false
     }
   ]
-}
-
-Exemplos de seletores:
-- Botão com texto: selectorType="role", selector="button", value="Aceitar cookies"
-- Link com texto: selectorType="role", selector="link", value="Entrar"
-- Por CSS: selectorType="css", selector=".btn-primary"
-- Por texto visível: selectorType="text", value="Texto exato"
-- Por ID: selectorType="id", selector="login-form"`;
+}`;
 
   const userPrompt = `URL: ${targetUrl}
   
-Fluxo desejado:
+Fluxo/Código fornecido:
 ${flowDescription}
 
-Gere os passos de automação Playwright para executar este fluxo.`;
+Converter e gerar os passos de automação Playwright correspondentes.`;
 
   if (!OPENROUTER_API_KEY) {
     // Fallback simples sem IA
@@ -135,7 +131,7 @@ Gere os passos de automação Playwright para executar este fluxo.`;
           { role: 'user', content: userMessageContent },
         ],
 
-        temperature: 0.2,
+        temperature: 0.1,
         max_tokens: 4000,
         response_format: { type: 'json_object' },
       }),
@@ -187,6 +183,38 @@ interface StepResult {
   duration?: number;
 }
 
+async function autoAcceptCookies(page: any) {
+  try {
+    const selectors = [
+      "button:has-text('Aceitar')",
+      "button:has-text('Aceitar todos')",
+      "button:has-text('Aceitar Cookies')",
+      "button:has-text('Aceitar cookies')",
+      "button:has-text('Concordar')",
+      "button:has-text('Prosseguir')",
+      "button:has-text('Entendi')",
+      "button:has-text('OK')",
+      "a:has-text('Aceitar')",
+      "[id*='cookie'] button",
+      "[class*='cookie'] button",
+      "[id*='lgpd'] button",
+      "[class*='lgpd'] button",
+      "#lgpd-accept",
+      "#btn-accept-cookie",
+    ];
+
+    for (const sel of selectors) {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible({ timeout: 300 }).catch(() => false)) {
+        await btn.click({ timeout: 800 }).catch(() => {});
+        await page.waitForTimeout(300);
+        console.log(`[SmartRun] Banner de cookies aceito automaticamente: ${sel}`);
+        break;
+      }
+    }
+  } catch { /* ignore cookie check errors */ }
+}
+
 async function runStep(
   page: any,
   step: SmartStep,
@@ -196,18 +224,33 @@ async function runStep(
   const start = Date.now();
   let screenshotBase64: string | undefined;
 
+  const takeScreenshot = async (fullPage = false): Promise<string | undefined> => {
+    try {
+      const buf = await page.screenshot({ type: 'jpeg', quality: 70, fullPage, timeout: 5000 });
+      return (buf as Buffer).toString('base64');
+    } catch { return undefined; }
+  };
+
   try {
     if (step.action === 'goto') {
       await page.goto(step.value || baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await autoAcceptCookies(page);
       await page.waitForTimeout(1000);
-      const buf = await page.screenshot({ type: 'jpeg', quality: 65 }).catch(() => null);
-      if (buf) screenshotBase64 = (buf as Buffer).toString('base64');
+      screenshotBase64 = await takeScreenshot();
       return { index, label: step.label, status: 'aprovado', detalhe: `Navegou para: ${step.value || baseUrl}`, screenshotBase64, duration: Date.now() - start };
     }
 
     if (step.action === 'wait') {
       await page.waitForTimeout(step.milliseconds || 1500);
-      return { index, label: step.label, status: 'aprovado', detalhe: `Aguardou ${step.milliseconds || 1500}ms`, duration: Date.now() - start };
+      screenshotBase64 = await takeScreenshot();
+      return { index, label: step.label, status: 'aprovado', detalhe: `Aguardou ${step.milliseconds || 1500}ms`, screenshotBase64, duration: Date.now() - start };
+    }
+
+    if (step.action === 'scroll') {
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.7));
+      await page.waitForTimeout(800);
+      screenshotBase64 = await takeScreenshot();
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem da página executada.', screenshotBase64, duration: Date.now() - start };
     }
 
     // Construir locator
@@ -226,44 +269,28 @@ async function runStep(
         locator = page.locator(step.selector || 'body');
     }
 
-    // Highlight visual + screenshot
-    await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    // Tentar aceitar cookies caso haja um banner visível cobrindo a tela
+    await autoAcceptCookies(page);
+
+    // Scroll para o elemento
+    await locator.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {});
+
+    // Highlight visual temporário antes da ação
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
       const old = { shadow: el.style.boxShadow, outline: el.style.outline, transition: el.style.transition };
       el.style.transition = 'none';
-      el.style.setProperty('box-shadow', '0 0 0 6px #ef4444, 0 0 25px rgba(239, 68, 68, 1)', 'important');
-      el.style.setProperty('outline', '6px solid #ef4444', 'important');
-      el.style.setProperty('outline-offset', '4px', 'important');
+      el.style.setProperty('box-shadow', '0 0 0 4px #ef4444, 0 0 20px rgba(239,68,68,0.8)', 'important');
+      el.style.setProperty('outline', '3px solid #ef4444', 'important');
+      el.style.setProperty('outline-offset', '3px', 'important');
       return old;
     }).catch(() => null);
 
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(400); // Breve pausa para mostrar o highlight
 
-    // Get bounding box for clipping with context (padding)
-    const box = await locator.boundingBox().catch(() => null);
-    let clipOptions = undefined;
-    if (box) {
-      const padding = 250; // 250px of context around the element
-      const vp = page.viewportSize() || { width: 1280, height: 800 };
-      clipOptions = {
-        x: Math.max(0, box.x - padding),
-        y: Math.max(0, box.y - padding),
-        width: Math.min(vp.width - Math.max(0, box.x - padding), box.width + padding * 2),
-        height: Math.min(vp.height - Math.max(0, box.y - padding), box.height + padding * 2),
-      };
-    }
-
-    const buf = await page.screenshot({ 
-      type: 'jpeg', 
-      quality: 75, 
-      timeout: 4000,
-      clip: clipOptions 
-    }).catch(() => null);
-    
-    if (buf) screenshotBase64 = (buf as Buffer).toString('base64');
-
+    // Remover highlight antes de executar a ação
     if (originalStyle) {
       await locator.evaluate((el: HTMLElement, old: any) => {
+        el.style.transition = old.transition || '';
         el.style.boxShadow = old.shadow || '';
         el.style.outline = old.outline || '';
       }, originalStyle).catch(() => {});
@@ -272,37 +299,60 @@ async function runStep(
     // Executar ação
     if (step.action === 'type') {
       await locator.fill(step.value || '', { timeout: 8000 });
+      await page.waitForTimeout(500);
     } else if (step.action === 'hover') {
       await locator.hover({ timeout: 8000 });
-    } else if (step.action === 'scroll') {
-      await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
+      await page.waitForTimeout(600);
     } else {
       // click
       if (step.isPopup) {
         const popup = page.waitForEvent('popup', { timeout: 8000 }).catch(() => null);
-        await locator.click({ timeout: 5000, noWaitAfter: true });
+        await locator.click({ timeout: 5000 });
         await popup;
       } else {
-        await locator.click({ timeout: 5000, noWaitAfter: true });
+        await locator.click({ timeout: 5000 });
       }
-      await page.waitForTimeout(1200);
-      
-      // Trava de segurança: Retornar à URL base se navegou para fora
-      const currentUrlBase = page.url().split('#')[0].split('?')[0];
-      const targetUrlBase = baseUrl.split('#')[0].split('?')[0];
-      if (currentUrlBase !== targetUrlBase) {
-         console.log(`[SmartRun] Navegação detectada de ${currentUrlBase} diferente de ${targetUrlBase}. Voltando para a URL padrão...`);
-         await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      }
+      // Aguardar a página reagir (navegação, modal, animação, etc.)
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {}),
+        page.waitForTimeout(1500),
+      ]);
     }
 
-    return { index, label: step.label, status: 'aprovado', detalhe: 'Executado com sucesso.', screenshotBase64, duration: Date.now() - start };
+    // Screenshot APÓS a ação — captura a evidência real do clique/resultado
+    screenshotBase64 = await takeScreenshot();
+
+    const detalhe = step.action === 'type'
+      ? `Digitado: "${step.value}" no campo.`
+      : step.action === 'hover'
+      ? `Hover realizado com sucesso.`
+      : `Clique executado. URL alcançada: ${page.url()}`;
+
+    // RETORNAR PARA A TELA INICIAL APÓS CADA PASSO
+    try {
+      if (step.action !== 'goto') {
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+        await autoAcceptCookies(page);
+        await page.waitForTimeout(400);
+      }
+    } catch { /* ignore reset error */ }
+
+    return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, duration: Date.now() - start };
 
   } catch (err: unknown) {
+    // Em caso de erro, tenta capturar o estado atual da página para evidência
+    screenshotBase64 = await takeScreenshot().catch(() => undefined);
+    
+    // Tenta retornar para a URL base mesmo após erro
+    try {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    } catch { /* ignore */ }
+
     const msg = err instanceof Error ? err.message.split('\n')[0].substring(0, 200) : String(err);
     return { index, label: step.label, status: 'falha_clique', detalhe: `Falha: ${msg}`, screenshotBase64, duration: Date.now() - start };
   }
 }
+
 
 // -------------------------------------------------------
 // Route Handler — POST

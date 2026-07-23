@@ -53,7 +53,16 @@ export function buildReportHtml(opts: ReportOptions): string {
   if (falhas > 0) recomendacoes.push('<strong>Estabilidade:</strong> Eventos de clique falharam em alguns passos. Verifique bloqueios por popups/overlays ou seletores desatualizados.');
   if (recomendacoes.length === 0) recomendacoes.push('<strong>Conformidade Plena:</strong> Fluxo validado com sucesso e aderente às cartilhas recomendadas.');
 
-  const cardsHtml = results.map(r => {
+  // Filtrar passos realmente relevantes para exibição no relatório principal
+  // (Passos de 'wait' ou 'scroll' aprovados não precisam virar cards individuais gigantes com prints idênticas)
+  const relevantesResults = results.filter(r => {
+    if (r.status !== 'aprovado') return true; // Falhas SEMPRE aparecem
+    const labelLower = (r.label || '').toLowerCase();
+    if (labelLower.includes('aguardar') && !labelLower.includes('navegação')) return false;
+    return true;
+  });
+
+  const cardsHtml = (relevantesResults.length > 0 ? relevantesResults : results).map(r => {
     const info = getStatusInfo(r.status as StatusBotao);
     const imagemHtml = r.screenshotBase64
       ? `<img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Evidência Passo #${r.index}">`
@@ -70,9 +79,9 @@ export function buildReportHtml(opts: ReportOptions): string {
         <div class="result-body">
           <div class="result-evidencia">${imagemHtml}</div>
           <div class="result-details">
-            <p class="label-title">Ação / Identificador</p>
-            <p class="text-content">${r.label || '<em>(Vazio)</em>'}</p>
-            <p class="label-title mt">Status Técnico</p>
+            <p class="label-title">Ação Realizada</p>
+            <p class="text-content">${r.label || '<em>(Sem descrição)</em>'}</p>
+            <p class="label-title mt">Resultado da Execução</p>
             <p class="detail-content">${r.detalhe}</p>
             ${r.duration ? `<p class="duration">⏱ ${r.duration}ms</p>` : ''}
           </div>
