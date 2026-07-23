@@ -89,15 +89,33 @@ async function executeStep(
     await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
 
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
-      const old = { shadow: el.style.boxShadow, outline: el.style.outline };
-      el.style.boxShadow = 'inset 0 0 0 3px red, 0 0 10px 2px rgba(255,0,0,0.5)';
-      el.style.outline = '3px solid red';
-      el.style.outlineOffset = '2px';
+      const old = { shadow: el.style.boxShadow, outline: el.style.outline, border: el.style.border };
+      el.style.setProperty('box-shadow', '0 0 0 6px red, 0 0 20px 5px rgba(255,0,0,0.6)', 'important');
+      el.style.setProperty('outline', '6px solid red', 'important');
+      el.style.setProperty('outline-offset', '4px', 'important');
       return old;
     }).catch(() => null);
 
-    await page.waitForTimeout(250);
-    const buf = await locator.screenshot({ timeout: 3000 }).catch(() => null);
+    await page.waitForTimeout(1500);
+    
+    const box = await locator.boundingBox().catch(() => null);
+    let clipOptions = undefined;
+    if (box) {
+      const padding = 200;
+      clipOptions = {
+        x: Math.max(0, box.x - padding),
+        y: Math.max(0, box.y - padding),
+        width: box.width + padding * 2,
+        height: box.height + padding * 2,
+      };
+    }
+
+    const buf = await page.screenshot({ 
+      type: 'jpeg', 
+      quality: 60, 
+      timeout: 3000,
+      clip: clipOptions 
+    }).catch(() => null);
     if (buf) screenshotBase64 = buf.toString('base64');
 
     if (originalStyle) {

@@ -144,9 +144,22 @@ Gere os passos de automação Playwright para executar este fluxo.`;
     if (res.ok) {
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content || '';
-      const cleaned = content.replace(/```json\n?|\n?```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      if (parsed.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+      // Procura pelo primeiro { e o último } no texto para garantir que pega apenas o JSON
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      let cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, '').trim();
+      
+      let parsed: any;
+      try {
+        if (!cleaned) throw new Error("A IA retornou conteúdo vazio.");
+        // Tenta remover virgulas sobrando no fim de arrays/objetos que a IA as vezes deixa
+        cleaned = cleaned.replace(/,\s*([\}\]])/g, '$1');
+        parsed = JSON.parse(cleaned);
+      } catch (parseErr) {
+        console.error('[SmartRun] Falha ao fazer parse do JSON retornado. Conteúdo:', cleaned);
+        throw parseErr;
+      }
+
+      if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
         console.log(`[SmartRun] IA gerou ${parsed.steps.length} passos`);
         return parsed.steps as SmartStep[];
       }
@@ -218,13 +231,13 @@ async function runStep(
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
       const old = { shadow: el.style.boxShadow, outline: el.style.outline, transition: el.style.transition };
       el.style.transition = 'none';
-      el.style.boxShadow = '0 0 0 6px #ef4444, 0 0 25px rgba(239, 68, 68, 1) !important';
-      el.style.outline = '6px solid #ef4444 !important';
-      el.style.outlineOffset = '2px';
+      el.style.setProperty('box-shadow', '0 0 0 6px #ef4444, 0 0 25px rgba(239, 68, 68, 1)', 'important');
+      el.style.setProperty('outline', '6px solid #ef4444', 'important');
+      el.style.setProperty('outline-offset', '4px', 'important');
       return old;
     }).catch(() => null);
 
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1500);
 
     // Get bounding box for clipping with context (padding)
     const box = await locator.boundingBox().catch(() => null);
@@ -273,6 +286,14 @@ async function runStep(
         await locator.click({ timeout: 5000, noWaitAfter: true });
       }
       await page.waitForTimeout(1200);
+      
+      // Trava de segurança: Retornar à URL base se navegou para fora
+      const currentUrlBase = page.url().split('#')[0].split('?')[0];
+      const targetUrlBase = baseUrl.split('#')[0].split('?')[0];
+      if (currentUrlBase !== targetUrlBase) {
+         console.log(`[SmartRun] Navegação detectada de ${currentUrlBase} diferente de ${targetUrlBase}. Voltando para a URL padrão...`);
+         await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      }
     }
 
     return { index, label: step.label, status: 'aprovado', detalhe: 'Executado com sucesso.', screenshotBase64, duration: Date.now() - start };

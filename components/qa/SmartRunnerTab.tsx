@@ -6,7 +6,7 @@ import {
   Globe, Zap, Loader2, FileDown, Eye, CheckCircle2,
   AlertCircle, ChevronDown, Play, Sparkles, RefreshCw,
   Target, Shield, BarChart3, Clock, ArrowRight, List,
-  Image as ImageIcon, X
+  Image as ImageIcon, X, Edit3, FileText, Printer
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -109,6 +109,12 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   const [elapsed, setElapsed]     = useState(0);
   const [showSteps, setShowSteps] = useState(false);
   const [showGenerated, setShowGenerated] = useState(false);
+
+  // Editor de PDF
+  const [showPdfEditor, setShowPdfEditor] = useState(false);
+  const [editTitle, setEditTitle]         = useState("");
+  const [editNotes, setEditNotes]         = useState("");
+  const [generatingEditedPdf, setGeneratingEditedPdf] = useState(false);
 
   const [contextImages, setContextImages] = useState<string[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
@@ -261,6 +267,68 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
     setElapsed(0);
     setShowSteps(false);
     setShowGenerated(false);
+    setShowPdfEditor(false);
+    setEditTitle("");
+    setEditNotes("");
+  };
+
+  // Abre painel de edição com valores padrão do resultado
+  const openPdfEditor = () => {
+    if (!result) return;
+    setEditTitle(result.jobName || "");
+    setEditNotes("");
+    setShowPdfEditor(true);
+  };
+
+  // Gera HTML customizado e abre para impressão
+  const handleDownloadEditedReport = async () => {
+    if (!result?.htmlReportUrl) return;
+    setGeneratingEditedPdf(true);
+    try {
+      // Busca o HTML original
+      const res = await fetch(result.htmlReportUrl);
+      let html = await res.text();
+
+      // Injeta título customizado
+      if (editTitle.trim()) {
+        html = html.replace(
+          /<h1>([^<]*)<\/h1>/,
+          `<h1>${editTitle.trim()}</h1>`
+        );
+        html = html.replace(
+          /<title>[^<]*<\/title>/,
+          `<title>${editTitle.trim()}</title>`
+        );
+      }
+
+      // Injeta notas adicionais antes do footer
+      if (editNotes.trim()) {
+        const notesHtml = `
+          <div style="margin:30px 0;padding:24px;background:#fffbeb;border:1px solid #fde68a;border-left:5px solid #f59e0b;border-radius:12px;page-break-inside:avoid;">
+            <h3 style="font-family:'Outfit',sans-serif;color:#b45309;font-size:18px;margin:0 0 12px;">📝 Notas e Observações</h3>
+            <p style="white-space:pre-wrap;color:#92400e;font-size:14px;line-height:1.6;margin:0;">${editNotes.trim().replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
+          </div>`;
+        html = html.replace('<div class="footer">', notesHtml + '<div class="footer">');
+      }
+
+      // Abre em nova aba e dispara impressão
+      const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (win) {
+        win.onload = () => {
+          setTimeout(() => {
+            win.print();
+            URL.revokeObjectURL(url);
+          }, 800);
+        };
+      }
+    } catch (err) {
+      console.error('Erro ao gerar PDF editado:', err);
+      alert('Erro ao gerar PDF. Tente novamente.');
+    } finally {
+      setGeneratingEditedPdf(false);
+    }
   };
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -553,16 +621,30 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                   <p className="text-xs text-muted-foreground">{result.targetUrl} · {formatTime(elapsed)} de execução</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {result.htmlReportUrl && (
+                  <button
+                    onClick={openPdfEditor}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all",
+                      showPdfEditor
+                        ? "bg-amber-500/20 border border-amber-500/40 text-amber-400"
+                        : "bg-violet-500 text-white hover:bg-violet-600 shadow-lg shadow-violet-500/25"
+                    )}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    {showPdfEditor ? "Editando PDF" : "Editar e Baixar PDF"}
+                  </button>
+                )}
                 {result.pdfUrl && (
                   <a
                     href={result.pdfUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-semibold hover:bg-violet-600 transition-all shadow-lg shadow-violet-500/25"
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:border-violet-500/30 transition-all"
                   >
                     <FileDown className="w-4 h-4" />
-                    Baixar PDF
+                    PDF Original
                   </a>
                 )}
                 {result.htmlReportUrl && (
@@ -585,6 +667,81 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                 </button>
               </div>
             </div>
+
+            {/* ── Editor de PDF ──────────────────────────────────── */}
+            <AnimatePresence>
+              {showPdfEditor && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="glass rounded-2xl border border-amber-500/30 p-5 space-y-4 bg-amber-500/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Edit3 className="w-4 h-4 text-amber-400" />
+                        <p className="text-sm font-semibold text-foreground">Editar antes de baixar</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-medium">PDF customizado</span>
+                      </div>
+                      <button onClick={() => setShowPdfEditor(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      {/* Título */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5" />
+                          Título do Relatório
+                        </label>
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={e => setEditTitle(e.target.value)}
+                          placeholder="Ex: Auditoria CDT Gov.br — Julho 2026"
+                          className="w-full px-4 py-2.5 rounded-xl bg-background/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 transition-all"
+                        />
+                      </div>
+
+                      {/* Notas */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                          <Edit3 className="w-3.5 h-3.5" />
+                          Notas e Observações Adicionais
+                          <span className="font-normal text-muted-foreground/60">(opcional)</span>
+                        </label>
+                        <textarea
+                          value={editNotes}
+                          onChange={e => setEditNotes(e.target.value)}
+                          rows={4}
+                          placeholder={`Adicione contexto, observações ou recomendações que aparecerão no relatório final...\n\nExemplo:\n- Revisão aprovada pelo time de segurança em 23/07/2026\n- Pendências: corrigir contraste nos botões do header`}
+                          className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 transition-all resize-none font-sans"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-amber-500/20">
+                      <p className="text-xs text-muted-foreground">
+                        O relatório será aberto em nova aba. Use <kbd className="px-1.5 py-0.5 rounded bg-muted border border-border text-[10px]">Ctrl+P</kbd> ou o diálogo de impressão para salvar como PDF.
+                      </p>
+                      <button
+                        onClick={handleDownloadEditedReport}
+                        disabled={generatingEditedPdf}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 disabled:opacity-50 transition-all shadow-lg shadow-amber-500/25"
+                      >
+                        {generatingEditedPdf
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Printer className="w-4 h-4" />
+                        }
+                        Abrir para Imprimir/PDF
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Métricas */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -616,6 +773,7 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                   src={`data:image/jpeg;base64,${result.finalScreenshot}`}
                   alt="Estado final"
                   className="w-full object-cover max-h-64"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
               </div>
             )}
@@ -697,10 +855,11 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                           {step.screenshotBase64 && (
                             <div className="mt-3 ml-9">
                               <img
-                                src={`data:image/png;base64,${step.screenshotBase64}`}
+                                src={`data:image/jpeg;base64,${step.screenshotBase64}`}
                                 alt={`Evidência passo ${step.index}`}
                                 className="rounded-lg border border-border max-h-96 object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity"
-                                onClick={() => window.open(`data:image/png;base64,${step.screenshotBase64}`, "_blank")}
+                                onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotBase64}`, "_blank")}
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                               />
                             </div>
                           )}

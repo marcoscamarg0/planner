@@ -56,7 +56,7 @@ export function buildReportHtml(opts: ReportOptions): string {
   const cardsHtml = results.map(r => {
     const info = getStatusInfo(r.status as StatusBotao);
     const imagemHtml = r.screenshotBase64
-      ? `<img src="data:image/png;base64,${r.screenshotBase64}" class="evidencia-img" alt="Evidência Passo #${r.index}">`
+      ? `<img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Evidência Passo #${r.index}">`
       : `<div class="sem-evidencia">Sem Evidência Capturada</div>`;
 
     return `

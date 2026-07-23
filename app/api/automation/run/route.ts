@@ -69,7 +69,11 @@ Regras:
     if (res.ok) {
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content || '';
-      const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, '').trim();
+      
+      if (!cleaned) throw new Error("A IA retornou conteúdo vazio.");
+      const parsed = JSON.parse(cleaned);
       if (parsed.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
         return parsed.steps as AutomationStep[];
       }

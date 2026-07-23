@@ -879,7 +879,11 @@ export function QaClient({ projects }: QaClientProps) {
 
             {/* History Toggle */}
             <button
-              onClick={() => setShowHistory(!showHistory)}
+              onClick={() => {
+                const next = !showHistory;
+                setShowHistory(next);
+                if (next) loadReports();
+              }}
               className={cn(
                 "flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-all",
                 showHistory
@@ -1083,6 +1087,54 @@ export function QaClient({ projects }: QaClientProps) {
                           </div>
                           {selectedReport.type === "test_report" ? (
                             <ReportDashboard reportText={selectedReport.result_raw} title={selectedReport.title} date={selectedReport.created_at} pdfImagesToRender={[]} />
+                          ) : selectedReport.type === "smart_runner" ? (
+                            <div className="space-y-3">
+                              {(() => {
+                                const d = selectedReport.result_json as any;
+                                return d ? (
+                                  <div className="space-y-3">
+                                    <div className="grid grid-cols-4 gap-3">
+                                      {[
+                                        { label: "Passos", value: d.totalSteps, color: "text-primary" },
+                                        { label: "Aprovados", value: d.approvedSteps, color: "text-emerald-400" },
+                                        { label: "Falhas", value: d.failedSteps, color: "text-rose-400" },
+                                        { label: "Violações eMAG", value: d.axeViolationsCount, color: "text-amber-400" },
+                                      ].map(m => (
+                                        <div key={m.label} className="text-center bg-accent/30 rounded-xl p-3 border border-border/50">
+                                          <p className={`text-xl font-bold ${m.color}`}>{m.value ?? "—"}</p>
+                                          <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">{m.label}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {d.pdfUrl && (
+                                        <a href={d.pdfUrl} target="_blank" rel="noopener noreferrer"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/20 transition-all">
+                                          <FileDown className="w-3 h-3" /> PDF Original
+                                        </a>
+                                      )}
+                                      {d.htmlReportUrl && (
+                                        <a href={d.htmlReportUrl} target="_blank" rel="noopener noreferrer"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:text-foreground transition-all">
+                                          <Eye className="w-3 h-3" /> Ver Relatório HTML
+                                        </a>
+                                      )}
+                                      <button
+                                        onClick={() => { setActiveTab("smart_runner"); }}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all"
+                                      >
+                                        <Zap className="w-3 h-3" /> Ver no Runner
+                                      </button>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      URL: <span className="font-mono">{d.targetUrl}</span>
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">Dados do relatório não disponíveis.</p>
+                                );
+                              })()}
+                            </div>
                           ) : (
                             <pre className="text-xs text-foreground leading-relaxed font-mono bg-black/20 rounded-xl p-4 max-h-64 overflow-y-auto whitespace-pre-wrap">
                               {selectedReport.result_raw}

@@ -36,7 +36,9 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
   return data.choices[0]?.message?.content || "";
 }
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+export async function GET(req: Request) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -52,7 +54,8 @@ export async function GET() {
     if (error) throw error;
     return NextResponse.json({ reports: data ?? [] });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[GET /api/ai/qa] Erro no histórico:", error);
+    return NextResponse.json({ error: error?.message || "Erro desconhecido" }, { status: 500 });
   }
 }
 
