@@ -109,6 +109,7 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   const [elapsed, setElapsed]     = useState(0);
   const [showSteps, setShowSteps] = useState(false);
   const [showGenerated, setShowGenerated] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
 
   // Editor de PDF
   const [showPdfEditor, setShowPdfEditor] = useState(false);
@@ -119,16 +120,28 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   const [contextImages, setContextImages] = useState<string[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
 
-  // Initialize with history report if provided
-  useEffect(() => {
-    if (initialReport) {
-      setResult(initialReport);
-      setTargetUrl(initialReport.targetUrl || "");
-      setJobName(initialReport.jobName || "");
-      setPhase("done");
-      setShowSteps(true);
+  // History
+  const [history, setHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [selectedHistory, setSelectedHistory] = useState<any | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const loadHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await fetch("/api/ai/qa");
+      if (res.ok) {
+        const data = await res.json();
+        // Filter smart_runner entries only
+        const runs = (data.reports || []).filter((r: any) => r.type === 'smart_runner');
+        setHistory(runs);
+      }
+    } catch { /* ignore */ } finally {
+      setLoadingHistory(false);
     }
-  }, [initialReport]);
+  };
+
+  useEffect(() => { loadHistory(); }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -226,6 +239,7 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
     }, 5000);
 
     try {
+      setLogs([]);
       const res = await fetch("/api/automation/smart-run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -239,18 +253,40 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
         }),
       });
 
-      const text = await res.text();
-      let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch (e) {
-        throw new Error("Erro no servidor (a resposta não é um JSON válido). O processo pode ter estourado a memória ou o limite de tempo no Render. Resposta: " + text.substring(0, 100));
+      if (!res.body) throw new Error("Sem resposta do servidor.");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ""; // Mantém o restante no buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+            if (chunk.type === 'log') {
+              setLogs(prev => [...prev, chunk.message]);
+            } else if (chunk.type === 'result') {
+              setResult(chunk.data);
+              setPhase("done");
+            } else if (chunk.type === 'error') {
+              throw new Error(chunk.error);
+            }
+          } catch (e: any) {
+            if (e.message && !e.message.includes('JSON')) {
+               throw e;
+            }
+          }
+        }
       }
 
-      if (!res.ok) throw new Error(data.error || "Falha na execução");
-
-      setResult(data);
-      setPhase("done");
     } catch (e: any) {
       setErrorMsg(e.message || "Erro inesperado");
       setPhase("error");
@@ -595,9 +631,30 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
               })}
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              Isso pode levar 1–3 minutos dependendo do site e número de passos.
-            </p>
+            {/* Terminal de Logs */}
+            <div className="mt-6 rounded-lg bg-[#0D1117] border border-border p-4 h-56 overflow-y-auto text-left font-mono text-xs flex flex-col gap-1 w-full max-w-3xl mx-auto shadow-inner relative flex-col-reverse">
+              <div className="absolute top-2 right-3 text-emerald-400 font-sans text-[10px] uppercase font-bold flex items-center gap-1 bg-[#0D1117] px-2 rounded-full border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
+              </div>
+              <div className="flex flex-col gap-1 w-full">
+                {logs.length === 0 && <span className="text-muted-foreground">Aguardando início do stream...</span>}
+                {logs.map((log, idx) => (
+                  <div key={idx} className={
+                    log.includes('✅ Aprovado') ? 'text-emerald-400' :
+                    log.includes('❌ Falhou') || log.includes('Falha') || log.includes('Erro') ? 'text-rose-400' :
+                    log.startsWith('[SmartRun]') ? 'text-violet-300 font-semibold' :
+                    'text-slate-300'
+                  }>
+                    <span className="text-slate-500 mr-2 text-[10px]">&gt;</span>
+                    {log}
+                  </div>
+                ))}
+                {phase === 'running' && logs.length > 0 && (
+                  <div className="text-slate-500 animate-pulse">_</div>
+                )}
+              </div>
+            </div>
+
           </motion.div>
         )}
       </AnimatePresence>
@@ -874,6 +931,243 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Histórico de Execuções ──────────────────────────── */}
+      <div className="glass rounded-2xl border border-border overflow-hidden">
+        <button
+          onClick={() => { setShowHistory(h => !h); if (!showHistory && history.length === 0) loadHistory(); }}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-accent/30 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-violet-400" />
+            <p className="text-sm font-semibold text-foreground">Histórico de Execuções</p>
+            {history.length > 0 && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/30 font-bold">
+                {history.length}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={e => { e.stopPropagation(); loadHistory(); }}
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", loadingHistory && "animate-spin")} />
+            </button>
+            <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", showHistory && "rotate-180")} />
+          </div>
+        </button>
+
+        <AnimatePresence>
+          {showHistory && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              {loadingHistory ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Carregando histórico...
+                </div>
+              ) : history.length === 0 ? (
+                <div className="px-5 py-8 text-center">
+                  <Clock className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Nenhuma execução encontrada.</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Execute um teste para ver o histórico aqui.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {history.map((item: any) => {
+                    const rj = item.result_json || {};
+                    const steps: StepResult[] = rj.steps || [];
+                    const approved = rj.approvedSteps ?? steps.filter((s: StepResult) => s.status === 'aprovado').length;
+                    const failed   = rj.failedSteps   ?? steps.filter((s: StepResult) => s.status !== 'aprovado').length;
+                    const isOpen   = selectedHistory?.id === item.id;
+                    const date     = new Date(item.created_at).toLocaleString('pt-BR');
+
+                    return (
+                      <div key={item.id}>
+                        {/* Header do item */}
+                        <button
+                          onClick={() => setSelectedHistory(isOpen ? null : item)}
+                          className={cn(
+                            "w-full flex items-center justify-between px-5 py-3.5 text-left transition-colors hover:bg-accent/30",
+                            isOpen && "bg-violet-500/5"
+                          )}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{item.title?.replace('Auditoria IA: ', '') || 'Execução'}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {date} · {steps.length} passos ·
+                              <span className="text-emerald-400 ml-1">{approved} ok</span>
+                              {failed > 0 && <span className="text-rose-400 ml-1">{failed} falha(s)</span>}
+                            </p>
+                          </div>
+                          <ChevronDown className={cn("w-4 h-4 text-muted-foreground shrink-0 ml-3 transition-transform", isOpen && "rotate-180")} />
+                        </button>
+
+                        {/* Detalhe expandido — Caso de Teste */}
+                        <AnimatePresence>
+                          {isOpen && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden bg-accent/5"
+                            >
+                              <div className="px-5 pb-5 pt-3 space-y-4">
+
+                                {/* Cabeçalho do Caso de Teste */}
+                                <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-2">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Caso de Teste</p>
+                                  <p className="text-sm font-semibold text-foreground">{item.title?.replace('Auditoria IA: ', '') || 'Execução SmartRunner'}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    <strong>URL Testada:</strong> {rj.targetUrl || item.input_description || '—'}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    <strong>Data:</strong> {date} · <strong>Modelo:</strong> {item.model_used}
+                                  </p>
+                                  <div className="flex gap-3 pt-1">
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">{steps.length} passos</span>
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium">{approved} aprovados</span>
+                                    {failed > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 font-medium">{failed} falhas</span>}
+                                  </div>
+                                </div>
+
+                                {/* Pré-condições */}
+                                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 space-y-1.5">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Pré-condições</p>
+                                  <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                                    <li>Navegador atualizado com acesso à internet.</li>
+                                    <li>URL acessível publicamente: <code className="text-xs bg-background px-1 py-0.5 rounded">{rj.targetUrl || '—'}</code></li>
+                                    <li>Executor: Playwright headless (Node.js).</li>
+                                  </ul>
+                                </div>
+
+                                {/* Execução passo a passo */}
+                                <div className="space-y-3">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/60">Execução e Evidências</p>
+                                  {steps.filter((s: StepResult) => {
+                                    const lbl = (s.label || '').toLowerCase();
+                                    if (s.status === 'aprovado' && (lbl === 'aguardar carregamento' || lbl === 'nova página criada')) return false;
+                                    return true;
+                                  }).map((step: StepResult, idx: number) => {
+                                    const st = step.status;
+                                    const statusColor = st === 'aprovado' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
+                                      : st === 'falha_clique' ? 'text-amber-400 bg-amber-400/10 border-amber-400/20'
+                                      : 'text-rose-400 bg-rose-400/10 border-rose-400/20';
+                                    const statusIcon = st === 'aprovado' ? '✓' : st === 'falha_clique' ? '⚡' : '✖';
+                                    const statusTxt  = st === 'aprovado' ? 'Aprovado' : st === 'falha_clique' ? 'Falha' : 'Erro';
+
+                                    // Resultado esperado
+                                    const lbl = (step.label || '').toLowerCase();
+                                    const resultadoEsperado = lbl.includes('acessar') || lbl.includes('goto')
+                                      ? 'Página deve carregar completamente.'
+                                      : lbl.includes('clicar') && lbl.includes('link') ? 'Link deve redirecionar para a página de destino.'
+                                      : lbl.includes('clicar') ? 'Elemento deve ser clicado e o sistema deve reagir.'
+                                      : lbl.includes('digitar') || lbl.includes('type') ? 'Campo deve exibir o texto inserido.'
+                                      : lbl.includes('rolar') ? 'Página deve rolar revelando conteúdo abaixo da dobra.'
+                                      : 'Sistema deve responder à ação sem erros.';
+
+                                    // Evidência funcional
+                                    const urlAlc = (step.detalhe || '').match(/url[^:]*:\s*(https?:\/\/[^\s]+)/i)?.[1] || '';
+                                    const newPath = urlAlc ? (() => { try { return new URL(urlAlc).pathname; } catch { return urlAlc; } })() : '';
+                                    const evidencia = st !== 'aprovado'
+                                      ? `Falha registrada: "${(step.detalhe || '').replace(/^Falha:\s*/i,'').substring(0, 150)}". Elemento pode estar oculto ou seletor inválido.`
+                                      : lbl.includes('clicar') && lbl.includes('link')
+                                        ? `Screenshot da nova página carregada após clique no link "${step.label.replace(/clicar no link/i,'').trim()}"${newPath ? '. URL alcançada: ' + newPath : ''}. Confirma redirecionamento correto${step.duration ? ' em ' + step.duration + 'ms' : ''}.`
+                                        : lbl.includes('acessar') || lbl.includes('goto')
+                                        ? `Screenshot da página renderizada${newPath ? ' (URL: ' + newPath + ')' : ''}. Conteúdo principal visível, carregamento confirmado${step.duration ? ' em ' + step.duration + 'ms' : ''}.`
+                                        : lbl.includes('clicar')
+                                        ? `Screenshot após clique${newPath ? ', URL resultante: ' + newPath : ''}. Ação executada${step.duration ? ' em ' + step.duration + 'ms' : ''}.`
+                                        : `${step.detalhe || 'Passo concluído.'}${step.duration ? ' (' + step.duration + 'ms)' : ''}.`;
+
+                                    return (
+                                      <div key={step.index} className="rounded-xl border border-border bg-background/30 overflow-hidden">
+                                        {/* Passo header */}
+                                        <div className="flex items-center gap-3 px-4 py-3 bg-accent/20 border-b border-border">
+                                          <span className={cn("inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full border", statusColor)}>
+                                            {statusIcon} {statusTxt}
+                                          </span>
+                                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Passo {idx + 1}</span>
+                                          {step.duration && <span className="text-[10px] text-muted-foreground/60 ml-auto font-mono">⏱ {step.duration}ms</span>}
+                                        </div>
+
+                                        <div className="p-4 space-y-3">
+                                          {/* Ação */}
+                                          <div>
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Ação Realizada</p>
+                                            <p className="text-sm font-medium text-foreground">{step.label}</p>
+                                          </div>
+
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            {/* Resultado esperado */}
+                                            <div>
+                                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Resultado Esperado</p>
+                                              <p className="text-xs text-foreground/80 leading-relaxed">{resultadoEsperado}</p>
+                                            </div>
+                                            {/* Resultado obtido */}
+                                            <div>
+                                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Resultado Obtido</p>
+                                              <p className="text-xs font-mono bg-accent/30 px-2 py-1.5 rounded-lg text-foreground/70 leading-relaxed break-all">{step.detalhe}</p>
+                                            </div>
+                                          </div>
+
+                                          {/* Evidência funcional */}
+                                          <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2">
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400 mb-1">Evidência Funcional</p>
+                                            <p className="text-xs text-blue-100/70 leading-relaxed italic">{evidencia}</p>
+                                          </div>
+
+                                          {/* Screenshot */}
+                                          {step.screenshotBase64 && (
+                                            <img
+                                              src={`data:image/jpeg;base64,${step.screenshotBase64}`}
+                                              alt={`Evidência passo ${step.index}`}
+                                              className="rounded-lg border border-border w-full max-h-72 object-contain shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
+                                              onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotBase64}`, '_blank')}
+                                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                            />
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Botões do relatório */}
+                                {(rj.htmlReportUrl || rj.pdfUrl) && (
+                                  <div className="flex gap-2 flex-wrap pt-2 border-t border-border">
+                                    {rj.htmlReportUrl && (
+                                      <a href={rj.htmlReportUrl} target="_blank" rel="noopener noreferrer"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/30 transition-all">
+                                        <Eye className="w-3.5 h-3.5" /> Ver Relatório HTML
+                                      </a>
+                                    )}
+                                    {rj.pdfUrl && (
+                                      <a href={rj.pdfUrl} target="_blank" rel="noopener noreferrer"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/30 transition-all">
+                                        <FileDown className="w-3.5 h-3.5" /> Baixar PDF
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
     </div>
   );
 }

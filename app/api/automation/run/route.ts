@@ -7,17 +7,25 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getQueue } from '@/lib/queue/queue';
 import type { AutomationJobData, AutomationStep } from '@/lib/queue/types';
+import { tryParseDirectSteps, robustJsonParse } from '@/lib/automation/parser';
 import { randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-// Traduz código de automação em passos estruturados via IA
+// Traduz código de automação em passos estruturados via IA ou parser nativo
 async function translateScriptToSteps(
   scriptCode: string,
-  targetUrl: string
+  targetUrl: string,
+  model = 'google/gemini-2.0-flash-exp:free'
 ): Promise<AutomationStep[]> {
+  
+  // 1. Tentar parser nativo primeiro (rápido e 100% preciso para Playwright traces)
+  const directSteps = tryParseDirectSteps(scriptCode);
+  if (directSteps) return directSteps;
+
+  // 2. Fallback para IA
   if (!OPENROUTER_API_KEY) {
     return [{ action: 'goto', label: 'Acessar URL', value: targetUrl }];
   }
@@ -56,7 +64,7 @@ Regras:
         'X-Title': 'Planner QA Suite',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-exp:free',
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Traduz este script para rodar em ${targetUrl}:\n\n${scriptCode.substring(0, 12000)}` },
@@ -70,12 +78,9 @@ Regras:
     if (res.ok) {
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content || '';
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, '').trim();
       
-      if (!cleaned) throw new Error("A IA retornou conteúdo vazio.");
-      const parsed = JSON.parse(cleaned);
-      if (parsed.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+      const parsed = robustJsonParse(content);
+      if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
         return parsed.steps as AutomationStep[];
       }
     }
@@ -83,7 +88,7 @@ Regras:
     console.error('[AutomationRun] Falha ao traduzir script via IA:', err);
   }
 
-  // Fallback: apenas navegar para a URL
+  // Fallback final: apenas navegar para a URL
   return [{ action: 'goto', label: 'Acessar URL', value: targetUrl }];
 }
 
@@ -94,47 +99,57 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
     const body = await req.json();
-    const { targetUrl, scriptCode, scriptSteps, jobName } = body;
-
-    if (!targetUrl) {
-      return NextResponse.json({ error: 'targetUrl é obrigatório' }, { status: 400 });
-    }
-
-    // Usar os passos fornecidos diretamente ou traduzir o código
-    let steps: AutomationStep[] = [];
-    if (scriptSteps && Array.isArray(scriptSteps) && scriptSteps.length > 0) {
-      steps = scriptSteps;
-    } else if (scriptCode) {
-      steps = await translateScriptToSteps(scriptCode, targetUrl);
-    } else {
-      return NextResponse.json({ error: 'Forneça scriptCode ou scriptSteps' }, { status: 400 });
-    }
-
-    const jobId = randomUUID();
-
-    const jobData: AutomationJobData = {
-      jobId,
-      jobName: jobName || `Automação ${new URL(targetUrl).hostname}`,
-      targetUrl,
-      scriptCode,
-      scriptSteps: steps,
-      requestedAt: new Date().toISOString(),
-      userId: user.id,
-    };
-
-    // Enfileirar no BullMQ
+    
+    // Suporte para envio em lote (Array de jobs)
+    const batchJobs = body.batchJobs || [body];
     const queue = getQueue();
-    await queue.add('run', jobData, { jobId });
+    const results = [];
 
-    console.log(`[AutomationRun] ✅ Job ${jobId} enfileirado (${steps.length} passos)`);
+    for (const job of batchJobs) {
+      const { targetUrl, scriptCode, scriptSteps, jobName, model } = job;
+      if (!targetUrl) continue;
+
+      let steps: AutomationStep[] = [];
+      if (scriptSteps && Array.isArray(scriptSteps) && scriptSteps.length > 0) {
+        steps = scriptSteps;
+      } else if (scriptCode) {
+        steps = await translateScriptToSteps(scriptCode, targetUrl, model);
+      } else {
+        continue;
+      }
+
+      const jobId = randomUUID();
+      const jobData: AutomationJobData = {
+        jobId,
+        jobName: jobName || `Automação ${new URL(targetUrl).hostname}`,
+        targetUrl,
+        scriptCode,
+        scriptSteps: steps,
+        requestedAt: new Date().toISOString(),
+        userId: user.id,
+      };
+
+      await queue.add('run', jobData, { jobId });
+      console.log(`[AutomationRun] ✅ Job ${jobId} enfileirado (${steps.length} passos)`);
+      
+      results.push({
+        jobId,
+        jobName: jobData.jobName,
+        totalSteps: steps.length,
+        statusUrl: `/api/automation/status/${jobId}`
+      });
+    }
+
+    if (results.length === 0) {
+      return NextResponse.json({ error: 'Nenhum job válido para enfileirar' }, { status: 400 });
+    }
 
     return NextResponse.json({
-      jobId,
-      jobName: jobData.jobName,
-      totalSteps: steps.length,
-      steps: steps.map(s => ({ label: s.label, action: s.action })),
-      statusUrl: `/api/automation/status/${jobId}`,
-      message: `Job enfileirado com sucesso. ${steps.length} passos a executar.`,
+      message: `${results.length} jobs enfileirados com sucesso.`,
+      jobs: results,
+      // Manter compatibilidade com chamadas individuais antigas
+      jobId: results[0].jobId,
+      statusUrl: results[0].statusUrl,
     });
 
   } catch (err: unknown) {

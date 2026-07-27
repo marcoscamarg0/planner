@@ -51,13 +51,22 @@ export async function GET(req: Request) {
       .order("created_at", { ascending: false })
       .limit(100);
 
-    if (error) throw error;
+    // Table might not exist yet — return empty list instead of 500
+    if (error) {
+      if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
+        console.warn("[GET /api/ai/qa] Tabela qa_reports não encontrada. Execute a migration 007.");
+        return NextResponse.json({ reports: [], warning: "Tabela ainda não foi criada. Execute a migration 007_recreate_qa_reports.sql no Supabase." });
+      }
+      throw error;
+    }
+
     return NextResponse.json({ reports: data ?? [] });
   } catch (error: any) {
     console.error("[GET /api/ai/qa] Erro no histórico:", error);
     return NextResponse.json({ error: error?.message || "Erro desconhecido" }, { status: 500 });
   }
 }
+
 
 export async function PUT(req: Request) {
   try {

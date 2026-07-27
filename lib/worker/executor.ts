@@ -67,7 +67,21 @@ async function executeStep(
 
   const takeScreenshot = async (): Promise<string | undefined> => {
     try {
-      const buf = await page.screenshot({ type: 'jpeg', quality: 70, timeout: 5000 });
+      const pages = page.context().pages();
+      const activePage = pages[pages.length - 1]; // Aba mais recente (popup ou atual)
+      
+      // Força a espera do carregamento e do rendering do JS para sites lentos
+      await activePage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      await activePage.waitForTimeout(2500);
+      
+      const buf = await activePage.screenshot({ type: 'jpeg', quality: 70, timeout: 8000 });
+      
+      // Fecha abas extras abertas por target="_blank" para manter o contexto limpo
+      if (pages.length > 1) {
+        for (let i = 1; i < pages.length; i++) {
+          await pages[i].close().catch(() => {});
+        }
+      }
       return buf.toString('base64');
     } catch { return undefined; }
   };
@@ -129,6 +143,8 @@ async function executeStep(
         locator = page.locator(step.selector || '*');
     }
 
+    locator = locator.first(); // Evitar erros de Strict Mode
+
     await job.log(`[Passo #${index}] Localizando: tipo='${step.selectorType}', seletor='${step.selector}', valor='${step.value}'`);
 
     // Tentar aceitar cookies caso haja banner bloqueando a tela
@@ -177,10 +193,10 @@ async function executeStep(
       // click (padrão)
       if (step.isPopup) {
         const popupPromise = page.waitForEvent('popup', { timeout: 8000 }).catch(() => null);
-        await locator.click({ timeout: 5000 });
+        await locator.click({ force: true, timeout: 5000 });
         await popupPromise;
       } else {
-        await locator.click({ timeout: 5000 });
+        await locator.click({ force: true, timeout: 5000 });
       }
       // Aguardar a página reagir
       await Promise.race([
@@ -192,20 +208,18 @@ async function executeStep(
     // Screenshot APÓS a ação — captura o estado resultante
     screenshotBase64 = await takeScreenshot();
 
-    const detalhe = step.action === 'type'
+    const activeUrl = page.context().pages().slice(-1)[0].url();
+    let detalhe = step.action === 'type'
       ? `Digitado: "${step.value}" no campo.`
       : step.action === 'hover'
       ? 'Hover realizado com sucesso.'
-      : `Ação executada. URL atual: ${page.url()}`;
+      : `Ação executada.`;
+      
+    if (activeUrl !== targetUrl && activeUrl !== 'about:blank') {
+      detalhe += ` ➡️ Nova página: ${activeUrl}`;
+    }
 
-    // Retornar à URL inicial após registrar o teste do passo
-    try {
-      if (step.action !== 'goto') {
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
-        await autoAcceptCookies(page);
-        await page.waitForTimeout(400);
-      }
-    } catch { /* ignore reset error */ }
+    // Removido o retorno forçado à URL inicial, para permitir que o fluxo progrida por múltiplas páginas
 
     return {
       index, label: step.label, status: 'aprovado',

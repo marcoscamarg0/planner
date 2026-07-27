@@ -216,9 +216,16 @@ export function AutoWebTab() {
   // AI Improvement State
   const [improvingReport, setImprovingReport] = useState(false);
 
-  // Live Screenshots captured via Playwright in the backend
+  // Live Screenshots captured via Playwright in the backend (for newly generated reports)
   const [liveScreenshots, setLiveScreenshots] = useState<{ label: string; base64: string }[]>([]);
   const [loadingScreenshots, setLoadingScreenshots] = useState(false);
+
+  // Screenshots for the currently selected history report
+  const [historyScreenshots, setHistoryScreenshots] = useState<{ label: string; base64: string }[]>([]);
+  const [loadingHistoryScreenshots, setLoadingHistoryScreenshots] = useState(false);
+
+  // History error state
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // ── Async Runner (BullMQ) state ──────────────────────────────────────────
   const [runnerStatus, setRunnerStatus]     = useState<RunnerStatus>('idle');
@@ -331,14 +338,25 @@ export function AutoWebTab() {
 
   const loadReports = useCallback(async () => {
     setLoadingReports(true);
+    setHistoryError(null);
     try {
       const res = await fetch("/api/ai/auto-web");
       if (res.ok) {
         const data = await res.json();
-        setReports(data.reports || []);
+        const list = data.reports || [];
+        setReports(list);
+        if (list.length === 0) {
+          setHistoryError("Nenhum relatório encontrado. Gere uma automação primeiro.");
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setHistoryError(err.error || "Erro ao carregar histórico.");
       }
-    } catch { /* silent */ }
-    finally { setLoadingReports(false); }
+    } catch (e: any) {
+      setHistoryError(e.message || "Erro de rede ao carregar histórico.");
+    } finally {
+      setLoadingReports(false);
+    }
   }, []);
 
   const handleGenerate = async () => {
@@ -926,7 +944,15 @@ export function AutoWebTab() {
                 </button>
               </div>
               {loadingReports ? (
-                <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">Carregando histórico...</span>
+                </div>
+              ) : historyError && Object.keys(grouped).length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-2 px-6 text-center">
+                  <AlertCircle className="w-6 h-6 text-amber-400 opacity-70" />
+                  <p className="text-sm text-muted-foreground">{historyError}</p>
+                </div>
               ) : Object.keys(grouped).length === 0 ? (
                 <p className="text-center py-6 text-sm text-muted-foreground">Nenhuma URL cadastrada ainda.</p>
               ) : (
@@ -960,9 +986,22 @@ export function AutoWebTab() {
                               onClick={() => {
                                 if (selectedReport?.id === r.id) {
                                   setSelectedReport(null);
+                                  setHistoryScreenshots([]);
                                 } else {
                                   setSelectedReport(r);
-                                  if (r.source_url) fetchLiveScreenshots(r.source_url);
+                                  setHistoryScreenshots([]);
+                                  if (r.source_url) {
+                                    setLoadingHistoryScreenshots(true);
+                                    fetch("/api/ai/auto-web/screenshot", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ url: r.source_url }),
+                                    })
+                                      .then(res => res.ok ? res.json() : Promise.reject())
+                                      .then(data => setHistoryScreenshots(data.screenshots || []))
+                                      .catch(() => {})
+                                      .finally(() => setLoadingHistoryScreenshots(false));
+                                  }
                                 }
                               }}
                               className={cn("w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all",
@@ -1010,6 +1049,14 @@ export function AutoWebTab() {
                     </div>
                   </div>
 
+                  {/* Screenshot loading indicator for history report */}
+                  {loadingHistoryScreenshots && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Capturando evidências visuais da URL...
+                    </div>
+                  )}
+
                   {/* Toggle dashboard vs raw code/markdown */}
                   <ReportDashboard
                     reportText={selectedReport.report_content}
@@ -1020,6 +1067,7 @@ export function AutoWebTab() {
                     fwName={selectedReport.framework}
                     reportId={selectedReport.id}
                     isHistory={true}
+                    screenshots={historyScreenshots}
                   />
 
                   <div className="space-y-2 mt-4 pt-4 border-t border-border/50">

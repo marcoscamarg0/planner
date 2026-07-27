@@ -27,9 +27,11 @@ import {
   Eye,
   FileDown,
   Zap,
+  List,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
+import { BatchRunnerTab } from "@/components/qa/BatchRunnerTab";
 
 const MODELS = [
   { key: "auto-free", label: "Automático (Recomendado)", provider: "OpenRouter", badge: "Gratuito" },
@@ -97,7 +99,7 @@ interface QaReport {
   result_json: any; created_at: string;
 }
 
-type ToolTab = "test_cases" | "test_report" | "smart_runner";
+type ToolTab = "test_cases" | "test_report" | "smart_runner" | "batch_runner";
 
 
 interface QaClientProps { projects: Project[]; }
@@ -133,6 +135,15 @@ export function QaClient({ projects }: QaClientProps) {
   const [loadingReports, setLoadingReports] = useState(false);
   const [selectedReport, setSelectedReport] = useState<QaReport | null>(null);
   const [consolidating, setConsolidating] = useState(false);
+
+  // QA Reports Management
+  const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
+  const [editingReport, setEditingReport] = useState<QaReport | null>(null);
+  const [deletingReportIds, setDeletingReportIds] = useState<string[] | null>(null);
+  const [exportingReportIds, setExportingReportIds] = useState<string[] | null>(null);
+  const [selectedExportProjectId, setSelectedExportProjectId] = useState<string>("");
+  const [isManagingReports, setIsManagingReports] = useState(false);
+
 
   // Evidence upload for test cases
   const [activeEvidenceTcId, setActiveEvidenceTcId] = useState<string | null>(null);
@@ -239,6 +250,85 @@ export function QaClient({ projects }: QaClientProps) {
       setLoadingReports(false);
     }
   }, []);
+
+  const toggleReportSelection = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setSelectedReportIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+  };
+
+  const handleDeleteReports = async () => {
+    if (!deletingReportIds || deletingReportIds.length === 0) return;
+    setIsManagingReports(true);
+    try {
+      const res = await fetch("/api/ai/qa/manage", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: deletingReportIds }),
+      });
+      if (res.ok) {
+        setReports(reports.filter(r => !deletingReportIds.includes(r.id)));
+        setSelectedReportIds(prev => prev.filter(id => !deletingReportIds.includes(id)));
+        if (selectedReport && deletingReportIds.includes(selectedReport.id)) setSelectedReport(null);
+      } else {
+        alert("Erro ao excluir relatórios.");
+      }
+    } catch {
+      alert("Erro ao excluir relatórios.");
+    } finally {
+      setIsManagingReports(false);
+      setDeletingReportIds(null);
+    }
+  };
+
+  const handleEditReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingReport) return;
+    setIsManagingReports(true);
+    try {
+      const res = await fetch("/api/ai/qa/manage", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingReport.id, title: editingReport.title, input_description: editingReport.input_description }),
+      });
+      if (res.ok) {
+        setReports(reports.map(r => r.id === editingReport.id ? { ...r, title: editingReport.title, input_description: editingReport.input_description } : r));
+        if (selectedReport?.id === editingReport.id) {
+          setSelectedReport({ ...selectedReport, title: editingReport.title, input_description: editingReport.input_description });
+        }
+      } else {
+        alert("Erro ao editar relatório.");
+      }
+    } catch {
+      alert("Erro ao editar relatório.");
+    } finally {
+      setIsManagingReports(false);
+      setEditingReport(null);
+    }
+  };
+
+  const handleExportReports = async () => {
+    if (!exportingReportIds || exportingReportIds.length === 0 || !selectedExportProjectId) return;
+    setIsManagingReports(true);
+    try {
+      const res = await fetch("/api/ai/qa/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportIds: exportingReportIds, projectId: selectedExportProjectId }),
+      });
+      if (res.ok) {
+        alert("Relatórios exportados com sucesso!");
+        setSelectedReportIds([]);
+      } else {
+        alert("Erro ao exportar relatórios.");
+      }
+    } catch {
+      alert("Erro ao exportar relatórios.");
+    } finally {
+      setIsManagingReports(false);
+      setExportingReportIds(null);
+      setSelectedExportProjectId("");
+    }
+  };
 
   useEffect(() => {
     if (showHistory) loadReports();
@@ -453,6 +543,7 @@ export function QaClient({ projects }: QaClientProps) {
 
   const tabs = [
     { key: "smart_runner" as ToolTab, label: "🤖 Runner IA",  icon: Zap,        desc: "URL + descrição → IA gera o script → executa → PDF" },
+    { key: "batch_runner" as ToolTab, label: "Lote / Fila", icon: List, desc: "Execute múltiplos testes em background" },
     { key: "test_cases" as ToolTab,  label: "Casos de Teste",icon: FlaskConical,desc: "Gere suítes de teste a partir de um requisito ou funcionalidade" },
     { key: "test_report" as ToolTab, label: "Relatório",    icon: FileText,   desc: "Documente resultados em um relatório profissional" },
   ];
@@ -1006,41 +1097,103 @@ export function QaClient({ projects }: QaClientProps) {
                       Nenhum relatório salvo ainda. Gere seu primeiro!
                     </div>
                   ) : (
-                    <div className="divide-y divide-border max-h-72 overflow-y-auto">
-                      {reports.map(r => (
-                        <button
-                          key={r.id}
-                          onClick={() => setSelectedReport(selectedReport?.id === r.id ? null : r)}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-accent/50 transition-colors",
-                            selectedReport?.id === r.id && "bg-primary/5"
-                          )}
-                        >
-                          <span className={cn("text-[10px] font-bold px-2 py-1 rounded-lg shrink-0", TYPE_COLOR[r.type] || "text-muted-foreground bg-accent")}>
-                            {TYPE_LABEL[r.type] || r.type}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{r.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(r.created_at).toLocaleString("pt-BR")} · {r.model_used}
-                              {r.framework && ` · ${r.framework}`}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {r.result_json && (
+                    <div className="flex flex-col">
+                      {/* Toolbar */}
+                      <AnimatePresence>
+                        {selectedReportIds.length > 0 && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="bg-primary/5 border-b border-primary/10 px-4 py-2 flex items-center justify-between"
+                          >
+                            <span className="text-xs font-medium text-primary">
+                              {selectedReportIds.length} selecionado{selectedReportIds.length > 1 ? "s" : ""}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {selectedReportIds.length === 1 && (
+                                <button
+                                  onClick={() => setEditingReport(reports.find(r => r.id === selectedReportIds[0]) || null)}
+                                  className="px-3 py-1.5 text-xs font-semibold bg-white border border-border rounded-lg text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+                                  disabled={isManagingReports}
+                                >
+                                  Editar
+                                </button>
+                              )}
                               <button
-                                onClick={e => { e.stopPropagation(); downloadJSON(r.result_json, r.title.replace(/\s/g, "_")); }}
-                                className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
-                                title="Baixar JSON"
+                                onClick={() => setExportingReportIds(selectedReportIds)}
+                                className="px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                                disabled={isManagingReports}
                               >
-                                <Download className="w-3.5 h-3.5" />
-                                JSON
+                                Enviar para Projeto
                               </button>
+                              <button
+                                onClick={() => setDeletingReportIds(selectedReportIds)}
+                                className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors disabled:opacity-50"
+                                title="Excluir selecionados"
+                                disabled={isManagingReports}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <div className="flex flex-col gap-2 p-3 max-h-[400px] overflow-y-auto bg-muted/10">
+                        {reports.map(r => (
+                          <div
+                            key={r.id}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-4 py-3 text-left hover:border-primary/40 hover:shadow-md transition-all cursor-pointer rounded-xl border bg-card shadow-sm",
+                              selectedReport?.id === r.id ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "border-border/60",
+                              selectedReportIds.includes(r.id) && "border-primary bg-primary/5"
                             )}
-                            <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform", selectedReport?.id === r.id && "rotate-90")} />
+                            onClick={() => setSelectedReport(selectedReport?.id === r.id ? null : r)}
+                          >
+                            <div className="flex items-center shrink-0" onClick={e => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selectedReportIds.includes(r.id)}
+                                onChange={(e) => toggleReportSelection(e as any, r.id)}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-1"
+                              />
+                            </div>
+                            <span className={cn("text-[10px] font-bold px-2.5 py-1 rounded-md shrink-0 uppercase tracking-wide", TYPE_COLOR[r.type] || "text-muted-foreground bg-accent")}>
+                              {TYPE_LABEL[r.type] || r.type}
+                            </span>
+                            <div className="flex-1 min-w-0 flex flex-col gap-1">
+                              <p className="text-sm font-semibold text-foreground truncate">{r.title}</p>
+                              <div className="flex items-center gap-2 text-[11px] text-muted-foreground truncate">
+                                <span>{new Date(r.created_at).toLocaleString("pt-BR", { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                <span className="w-1 h-1 rounded-full bg-border" />
+                                <span className="font-mono text-[10px]">{r.model_used}</span>
+                                {r.framework && (
+                                  <>
+                                    <span className="w-1 h-1 rounded-full bg-border" />
+                                    <span className="font-mono text-[10px]">{r.framework}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              {r.result_json && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); downloadJSON(r.result_json, r.title.replace(/\s/g, "_")); }}
+                                  className="text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-primary/10"
+                                  title="Baixar JSON"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  JSON
+                                </button>
+                              )}
+                              <div className={cn("p-1.5 rounded-full transition-colors", selectedReport?.id === r.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground")}>
+                                <ChevronRight className={cn("w-4 h-4 transition-transform duration-300", selectedReport?.id === r.id && "rotate-90")} />
+                              </div>
+                            </div>
                           </div>
-                        </button>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -1153,6 +1306,10 @@ export function QaClient({ projects }: QaClientProps) {
         {/* Tab Content */}
         {activeTab === "smart_runner" ? (
           <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} />
+        ) : activeTab === "batch_runner" ? (
+          <div className="max-w-5xl mx-auto px-6 pb-6">
+            <BatchRunnerTab />
+          </div>
         ) : (
           <div className="max-w-5xl mx-auto px-6 pb-6 space-y-6">
 
@@ -1421,6 +1578,124 @@ export function QaClient({ projects }: QaClientProps) {
         </div>
         )}
       </div>
+
+      {/* Edit Modal */}
+      {editingReport && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex justify-between items-center bg-muted/30">
+              <h3 className="font-semibold">Editar Relatório</h3>
+              <button onClick={() => setEditingReport(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditReport} className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Título</label>
+                <input
+                  type="text"
+                  value={editingReport.title}
+                  onChange={e => setEditingReport({ ...editingReport, title: e.target.value })}
+                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Descrição</label>
+                <textarea
+                  value={editingReport.input_description}
+                  onChange={e => setEditingReport({ ...editingReport, input_description: e.target.value })}
+                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm h-24 focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={() => setEditingReport(null)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={isManagingReports} className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
+                  {isManagingReports ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {exportingReportIds && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex justify-between items-center bg-muted/30">
+              <h3 className="font-semibold">Exportar para Projeto</h3>
+              <button onClick={() => { setExportingReportIds(null); setSelectedExportProjectId(""); }} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Você selecionou <strong>{exportingReportIds.length}</strong> relatório(s). Eles serão exportados como <strong>Novas Tarefas</strong> na Pauta do projeto escolhido.
+              </p>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Selecione o Projeto</label>
+                <select
+                  value={selectedExportProjectId}
+                  onChange={e => setSelectedExportProjectId(e.target.value)}
+                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  <option value="">Selecione...</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button onClick={() => { setExportingReportIds(null); setSelectedExportProjectId(""); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleExportReports}
+                  disabled={!selectedExportProjectId || isManagingReports}
+                  className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isManagingReports ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Confirmar Exportação
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Modal */}
+      {deletingReportIds && deletingReportIds.length > 0 && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-rose-500/20 rounded-xl shadow-xl w-full max-w-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex justify-between items-center bg-rose-500/5">
+              <h3 className="font-semibold text-rose-600 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Excluir Relatórios</h3>
+              <button onClick={() => setDeletingReportIds(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Tem certeza que deseja excluir <strong>{deletingReportIds.length}</strong> relatório(s)? Esta ação não pode ser desfeita.
+              </p>
+              <div className="pt-2 flex justify-end gap-3">
+                <button onClick={() => setDeletingReportIds(null)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground bg-accent/50 rounded-lg">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeleteReports}
+                  disabled={isManagingReports}
+                  className="px-4 py-2 bg-rose-500 text-white text-sm font-semibold rounded-lg hover:bg-rose-600 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isManagingReports ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Confirmar Exclusão
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
