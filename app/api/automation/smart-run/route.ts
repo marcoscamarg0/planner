@@ -51,15 +51,19 @@ const SMART_RUN_SYSTEM_PROMPT = [
   '5. SEM NOVAS PÁGINAS: NÃO inclua a action "newPage". Se houver abertura de popup ou nova aba, trate como { "action":"wait", "milliseconds":1500, "label":"Aguardar carregamento da nova guia" }.',
   '6. LABELS PROFISSIONAIS: "label" deve ser escrito de forma técnica em português, detalhando a ação (Ex: "Acessar o portal principal", "Preencher credenciais no formulário", "Validar carregamento do modal").',
   '7. COBERTURA TOTAL E EXAUSTIVA: Expanda o script do usuário ao máximo! Adicione passos de validação visual e scroll. É OBRIGATÓRIO gerar PELO MENOS 30 passos JSON, intercalando cliques, scolls e waits.',
+  '8. LIBERAÇÃO DE COOKIES: O PRIMEIRO passo de interação (logo após o "goto" e o "wait" inicial) DEVE OBRIGATORIAMENTE ser uma tentativa de aceitar cookies ou fechar banners de privacidade, mesmo que o usuário não tenha pedido. Use { "action": "click", "selectorType": "text", "selector": "Aceitar", "label": "Aceitar cookies e políticas de privacidade" }.',
+  '9. RETORNO DE ABA (MUITO IMPORTANTE): Toda vez que o fluxo clicar em um link que sai da página original (como redes sociais, Facebook, WhatsApp, Twitter, etc) ou que abre uma aba nova, O PASSO SEGUINTE DEVE SER FECHAR ESSA ABA E VOLTAR PARA A ORIGINAL. Use a action especial: { "action": "closePopups", "label": "Fechar aba externa e retornar à página original" }.',
   '',
   'RESPOSTA — RETORNE APENAS ESTE JSON, NADA MAIS:',
   '{',
   '  "steps": [',
   '    { "action": "goto", "label": "Acessar o ambiente de homologação", "value": "https://..." },',
   '    { "action": "wait", "milliseconds": 2000, "label": "Aguardar carregamento inicial do DOM" },',
+  '    { "action": "click", "selectorType": "text", "selector": "Aceitar", "label": "Aceitar cookies e políticas de privacidade" },',
   '    { "action": "scroll", "label": "Rolar a página para inspecionar elementos inferiores" },',
   '    { "action": "wait", "milliseconds": 1500, "label": "Aguardar renderização dos componentes" },',
-  '    { "action": "click", "selectorType": "role", "selector": "button", "value": "Entrar", "label": "Acionar botão de login" }',
+  '    { "action": "click", "selectorType": "role", "selector": "button", "value": "Entrar", "label": "Acionar botão de login" },',
+  '    { "action": "closePopups", "label": "Fechar abas excedentes e voltar ao fluxo principal" }',
   '  ]',
   '}',
   '',
@@ -259,6 +263,26 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       await activePage.waitForTimeout(800);
       screenshotBase64 = await takeScreenshot(activePage);
       return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', screenshotBase64, duration: Date.now() - start };
+    }
+
+    // Action Customizada: closePopups
+    if (step.action as any === 'closePopups') {
+      const pages = page.context().pages();
+      let closed = 0;
+      if (pages.length > 1) {
+        // Fecha da mais recente até sobrar só a original (pages[0])
+        for (let i = pages.length - 1; i > 0; i--) {
+          await pages[i].close().catch(() => {});
+          closed++;
+        }
+      }
+      await page.bringToFront().catch(() => {});
+      screenshotBase64 = await takeScreenshot(page);
+      return { 
+        index, label: step.label, status: 'aprovado', 
+        detalhe: closed > 0 ? `Fechou ${closed} aba(s) externa(s).` : 'Nenhuma aba externa para fechar.', 
+        screenshotBase64, duration: Date.now() - start 
+      };
     }
 
     // Build locator across all open pages (newest to oldest)
