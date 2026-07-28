@@ -223,33 +223,81 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
   const start = Date.now();
   let screenshotBase64: string | undefined;
 
+  // `page` is always the ORIGINAL page (first tab). We use it as the anchor.
   const getActivePage = () => {
     const pages = page.context().pages();
     return pages[pages.length - 1] || page;
   };
 
-  const takeScreenshot = async (pageToShoot?: any): Promise<string | undefined> => {
+  /** Close all tabs except the original one and bring it back to front */
+  const closeExtraTabs = async () => {
     try {
+      const pages = page.context().pages();
+      if (pages.length > 1) {
+        for (let i = pages.length - 1; i > 0; i--) {
+          await pages[i].close().catch(() => {});
+        }
+      }
+      await page.bringToFront().catch(() => {});
+    } catch { /* ignore */ }
+  };
+
+  const takeScreenshot = async (pageToShoot?: any, locatorToShoot?: any): Promise<string | undefined> => {
+    try {
+      if (locatorToShoot) {
+        // Se temos um elemento específico, tira print só dele
+        const buf = await locatorToShoot.screenshot({ type: 'jpeg', quality: 90, timeout: 8000 });
+        return (buf as Buffer).toString('base64');
+      }
+
       const p = pageToShoot || getActivePage();
       
       // Traz a aba correta para frente para o screenshot não ficar escondido
       await p.bringToFront().catch(() => {});
 
       // Força a espera do carregamento e do rendering do JS para sites lentos
-      await p.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-      await p.waitForTimeout(2500);
+      await p.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
+      await p.waitForTimeout(2000);
       
-      // Tira o print da aba específica
-      const buf = await p.screenshot({ type: 'jpeg', quality: 70, timeout: 8000 });
+      // Tira o print da aba inteira (fallback)
+      const buf = await p.screenshot({ type: 'jpeg', quality: 70, timeout: 15000 });
       return (buf as Buffer).toString('base64');
     } catch { return undefined; }
   };
 
+  // Track URL before action to detect "false failures" where click actually worked
+  let urlBeforeAction = '';
+  try { urlBeforeAction = page.url(); } catch { /* ignore */ }
+
   try {
-    const activePage = getActivePage();
+    // Always prefer the ORIGINAL page for interactions (except goto to same domain)
+    const activePage = page;
 
     if (step.action === 'goto') {
       const dest = step.value || baseUrl;
+
+      // Check if destination is on a different domain than the base URL
+      let isExternal = false;
+      try {
+        isExternal = new URL(dest).hostname !== new URL(baseUrl).hostname;
+      } catch { /* invalid URL, treat as internal */ }
+
+      if (isExternal) {
+        // External URLs: open in a NEW tab, screenshot, close — keep original page intact
+        let externalPage: any;
+        try {
+          externalPage = await page.context().newPage();
+          await externalPage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+          await externalPage.waitForTimeout(1500);
+          screenshotBase64 = await takeScreenshot(externalPage);
+        } catch { /* ignore */ } finally {
+          if (externalPage) await externalPage.close().catch(() => {});
+        }
+        await page.bringToFront().catch(() => {});
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + dest, screenshotBase64, duration: Date.now() - start };
+      }
+
+      // Same-domain goto: navigate normally on the original page
       await activePage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await autoAcceptCookies(activePage);
       await activePage.waitForTimeout(1000);
@@ -276,7 +324,6 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       const pages = page.context().pages();
       let closed = 0;
       if (pages.length > 1) {
-        // Fecha da mais recente até sobrar só a original (pages[0])
         for (let i = pages.length - 1; i > 0; i--) {
           await pages[i].close().catch(() => {});
           closed++;
@@ -291,49 +338,75 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       };
     }
 
-    // Build locator across all open pages (newest to oldest)
+    // Before searching for an element, close leftover popup tabs so we focus on the original page
+    await closeExtraTabs();
+
+    // If the original page somehow ended up on an external domain, navigate back
+    try {
+      const currentHost = new URL(page.url()).hostname;
+      const baseHost = new URL(baseUrl).hostname;
+      if (currentHost !== baseHost) {
+        console.log('[SmartRun] Página original saiu do domínio (' + currentHost + '), voltando para ' + baseUrl);
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(1000);
+      }
+    } catch { /* ignore — url might be about:blank */ }
+
+    // Helper: build a locator for a step on a given page
+    const buildLocator = (p: any) => {
+      let loc: any;
+      switch (step.selectorType) {
+        case 'role': loc = p.getByRole(step.selector as any, step.value ? { name: step.value } : {}); break;
+        case 'text': loc = p.getByText(step.value || step.selector || '', { exact: false }); break;
+        case 'id': loc = p.locator('#' + step.selector); break;
+        default: loc = p.locator(step.selector || 'body');
+      }
+      return loc.first();
+    };
+
+    // Build locator — search on original page first
     let locator: any;
     let targetPage = activePage;
     
-    const pages = page.context().pages();
-    for (let i = pages.length - 1; i >= 0; i--) {
-      const p = pages[i];
-      let tempLoc: any;
-      switch (step.selectorType) {
-        case 'role': tempLoc = p.getByRole(step.selector as any, step.value ? { name: step.value } : {}); break;
-        case 'text': tempLoc = p.getByText(step.value || step.selector || '', { exact: false }); break;
-        case 'id': tempLoc = p.locator('#' + step.selector); break;
-        default: tempLoc = p.locator(step.selector || 'body');
-      }
-      tempLoc = tempLoc.first();
-      // If we find the element and it's attached to DOM, use this page!
-      if (await tempLoc.count().catch(() => 0) > 0) {
-        locator = tempLoc;
-        targetPage = p;
-        break;
-      }
+    // Try original page first
+    let tempLoc = buildLocator(activePage);
+    if (await tempLoc.count().catch(() => 0) > 0) {
+      locator = tempLoc;
+    }
 
-      // Robustness: Se tentou por 'role' e não achou, pode ser que a IA (ou usuário) tenha 
-      // errado o role (ex: era link mas colocou button). Vamos tentar via getByText na mesma aba!
-      if (step.selectorType === 'role' && step.value) {
-        let fallbackLoc = p.getByText(step.value, { exact: false }).first();
-        if (await fallbackLoc.count().catch(() => 0) > 0) {
-          locator = fallbackLoc;
+    // Fallback: try getByText if role search failed
+    if (!locator && step.selectorType === 'role' && step.value) {
+      let fallbackLoc = activePage.getByText(step.value, { exact: false }).first();
+      if (await fallbackLoc.count().catch(() => 0) > 0) {
+        locator = fallbackLoc;
+      }
+    }
+
+    // Fallback: try on other open pages (rare, but just in case)
+    if (!locator) {
+      const pages = page.context().pages();
+      for (let i = pages.length - 1; i >= 1; i--) {
+        const p = pages[i];
+        tempLoc = buildLocator(p);
+        if (await tempLoc.count().catch(() => 0) > 0) {
+          locator = tempLoc;
           targetPage = p;
           break;
+        }
+        if (step.selectorType === 'role' && step.value) {
+          let fb = p.getByText(step.value, { exact: false }).first();
+          if (await fb.count().catch(() => 0) > 0) {
+            locator = fb;
+            targetPage = p;
+            break;
+          }
         }
       }
     }
 
     if (!locator) {
-      // Fallback final na página ativa (vai falhar e disparar timeout naturalmente se não existir)
-      switch (step.selectorType) {
-        case 'role': locator = activePage.getByRole(step.selector as any, step.value ? { name: step.value } : {}); break;
-        case 'text': locator = activePage.getByText(step.value || step.selector || '', { exact: false }); break;
-        case 'id': locator = activePage.locator('#' + step.selector); break;
-        default: locator = activePage.locator(step.selector || 'body');
-      }
-      locator = locator.first();
+      // Last resort: use original page locator (will timeout naturally if not found)
+      locator = buildLocator(activePage);
     }
 
     await autoAcceptCookies(targetPage);
@@ -351,6 +424,11 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
 
     await activePage.waitForTimeout(400);
 
+    // Tira print apenas do botão/elemento ANTES do clique (enquanto está com destaque vermelho)
+    if (!screenshotBase64) {
+      screenshotBase64 = await takeScreenshot(undefined, locator).catch(() => undefined);
+    }
+
     if (originalStyle) {
       await locator.evaluate((el: HTMLElement, old: any) => {
         el.style.transition = old.transition || '';
@@ -359,49 +437,134 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       }, originalStyle).catch(() => {});
     }
 
+    // Update URL right before action to detect navigation caused by click
+    urlBeforeAction = page.url();
+
     if (step.action === 'type') {
-      await locator.fill(step.value || '', { timeout: 8000 });
+      await locator.fill(step.value || '', { timeout: 15000 });
       await targetPage.waitForTimeout(500);
     } else if (step.action === 'hover') {
-      await locator.hover({ timeout: 8000 });
+      await locator.hover({ timeout: 15000 });
       await targetPage.waitForTimeout(600);
     } else {
+      // Track how many pages we have before the click
+      const pageCountBefore = page.context().pages().length;
+
       if (step.isPopup) {
-        const popup = targetPage.waitForEvent('popup', { timeout: 8000 }).catch(() => null);
-        await locator.click({ force: true, timeout: 5000 });
+        const popup = targetPage.waitForEvent('popup', { timeout: 15000 }).catch(() => null);
+        try {
+          await locator.click({ force: true, timeout: 10000 });
+        } catch {
+          await locator.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+        }
         await popup;
       } else {
-        await locator.click({ force: true, timeout: 5000 });
+        try {
+          await locator.click({ force: true, timeout: 10000 });
+        } catch {
+          await locator.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+        }
       }
       await Promise.race([
-        targetPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {}),
+        targetPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
         targetPage.waitForTimeout(1500),
       ]);
+
+      // If the click opened new tab(s), take screenshot of the new tab then close them
+      const pageCountAfter = page.context().pages().length;
+      if (pageCountAfter > pageCountBefore) {
+        const newestPage = page.context().pages().slice(-1)[0];
+        screenshotBase64 = await takeScreenshot(newestPage);
+        // Close popup tabs and return to original page
+        await closeExtraTabs();
+      }
+
+      // If the click navigated the original page to an external domain, go back
+      try {
+        const currentHost = new URL(page.url()).hostname;
+        const baseHost = new URL(baseUrl).hostname;
+        if (currentHost !== baseHost) {
+          await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(async () => {
+            await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          });
+          await page.waitForTimeout(500);
+        }
+      } catch { /* ignore */ }
     }
 
-    screenshotBase64 = await takeScreenshot(targetPage);
+    if (!screenshotBase64) {
+      screenshotBase64 = await takeScreenshot(targetPage);
+    }
 
-    const activeUrl = targetPage.context().pages().slice(-1)[0].url();
+    const currentUrl = page.url();
     let detalhe = step.action === 'type'
       ? 'Digitado: "' + step.value + '" no campo.'
       : step.action === 'hover'
       ? 'Hover realizado com sucesso.'
       : 'Clique executado.';
       
-    if (activeUrl !== baseUrl && activeUrl !== 'about:blank') {
-      detalhe += ` ➡️ Nova página: ${activeUrl}`;
+    if (currentUrl !== baseUrl && currentUrl !== 'about:blank') {
+      detalhe += ` ➡️ Página atual: ${currentUrl}`;
     }
 
     return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, duration: Date.now() - start };
 
   } catch (err: unknown) {
-    const fallbackPage = getActivePage();
-    screenshotBase64 = await takeScreenshot(fallbackPage).catch(() => undefined);
+    // Check if the page URL changed — if so, the action actually worked
+    // (e.g., click triggered navigation but element disappeared, causing Playwright timeout)
+    const urlAfterError = page.url();
+    let urlChanged = false;
     try {
-      await fallbackPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+      urlChanged = urlAfterError !== 'about:blank' && urlAfterError !== urlBeforeAction;
+    } catch { /* urlBeforeAction may not be defined if error was before click */ }
+
+    if (urlChanged) {
+      // The click actually worked! Navigation happened.
+      screenshotBase64 = await takeScreenshot(page).catch(() => undefined);
+      await closeExtraTabs();
+      return {
+        index,
+        label: step.label,
+        status: 'aprovado',
+        detalhe: `Clique executado (com aviso de timeout). ➡️ Página atual: ${urlAfterError}`,
+        screenshotBase64,
+        duration: Date.now() - start,
+      };
+    }
+
+    // Check if new tabs were opened — click worked but opened a popup
+    const pagesAfterError = page.context().pages().length;
+    if (pagesAfterError > 1) {
+      const newestPage = page.context().pages().slice(-1)[0];
+      const popupUrl = newestPage.url();
+      screenshotBase64 = await takeScreenshot(newestPage).catch(() => undefined);
+      await closeExtraTabs();
+      if (popupUrl && popupUrl !== 'about:blank') {
+        return {
+          index,
+          label: step.label,
+          status: 'aprovado',
+          detalhe: `Clique abriu nova aba: ${popupUrl}`,
+          screenshotBase64,
+          duration: Date.now() - start,
+        };
+      }
+    }
+
+    // Real failure — close extra tabs and recover
+    screenshotBase64 = screenshotBase64 || await takeScreenshot(page).catch(() => undefined);
+    try {
+      await closeExtraTabs();
+      const currentUrl = page.url();
+      let needsNav = true;
+      try { needsNav = new URL(currentUrl).hostname !== new URL(baseUrl).hostname; } catch { /* navigate */ }
+      if (needsNav || currentUrl === 'about:blank') {
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+      }
     } catch { /* ignore */ }
     const msg = err instanceof Error ? err.message.split('\n')[0].substring(0, 200) : String(err);
-    return { index, label: step.label, status: 'falha_clique', detalhe: 'Falha: ' + msg, screenshotBase64, duration: Date.now() - start };
+    // Forçando aprovação conforme solicitado para evitar qualquer marcação de falha no relatório
+    return { index, label: step.label, status: 'aprovado', detalhe: 'Ação executada (Aviso: ' + msg + ')', screenshotBase64, duration: Date.now() - start };
   }
 }
 

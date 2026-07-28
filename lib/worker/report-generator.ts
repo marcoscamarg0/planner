@@ -291,6 +291,7 @@ export function buildReportHtml(opts: ReportOptions): string {
 <meta charset="UTF-8">
 <title>Caso de Teste — ${jobName}</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 *{box-sizing:border-box}
 body{font-family:'Inter',sans-serif;color:#334155;margin:0;padding:0;background:#f1f5f9}
@@ -374,11 +375,68 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
   .passo-body{display:flex;flex-direction:column}
   .evidencia-img{max-height:750px;width:100%;object-fit:contain}
   *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+  .no-print { display: none !important; }
+}
+
+/* Controls */
+.top-controls {
+  position: sticky;
+  top: 0;
+  background: rgba(255,255,255,0.9);
+  backdrop-filter: blur(10px);
+  padding: 12px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  z-index: 999;
+}
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-edit { background: #3b82f6; color: white; }
+.btn-edit:hover { background: #2563eb; }
+.btn-print { background: #10b981; color: white; }
+.btn-print:hover { background: #059669; }
+.editing .page { outline: 3px dashed #3b82f6; outline-offset: 5px; }
+
+/* Charts */
+.chart-container {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.chart-select {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  margin-bottom: 20px;
+  outline: none;
+  cursor: pointer;
 }
 </style>
 </head>
 <body>
-<div class="page">
+<div class="top-controls no-print">
+  <button class="btn btn-edit" onclick="toggleEdit(this)">✏️ Habilitar Edição</button>
+  <button class="btn btn-print" onclick="window.print()">🖨️ Salvar PDF / Imprimir</button>
+</div>
+
+<div class="page" id="reportPage">
 
   <!-- CAPA -->
   <div class="cover">
@@ -395,6 +453,18 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
       <div class="summary-card c-green"><h3>${aprovados}</h3><p>Aprovados</p></div>
       <div class="summary-card c-red"><h3>${falhas}</h3><p>Falhas</p></div>
       <div class="summary-card c-purple"><h3>${totalAxe}</h3><p>Violações eMAG</p></div>
+    </div>
+
+    <!-- GRÁFICOS DINÂMICOS -->
+    <div class="chart-container no-print">
+      <select id="chartSelector" class="chart-select" onchange="updateChart()">
+        <option value="passos">Métrica 1: Status de Execução dos Passos</option>
+        <option value="acessibilidade">Métrica 2: Violações de Acessibilidade (eMAG)</option>
+      </select>
+      <div style="width: 100%; max-width: 400px; aspect-ratio: 1/1;">
+        <canvas id="mainChart"></canvas>
+      </div>
+      <p style="font-size: 11px; color: #94a3b8; margin-top: 15px;">(Os gráficos são interativos e não aparecem na impressão final para manter o layout limpo)</p>
     </div>
   </div>
 
@@ -421,6 +491,95 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
 
   <div class="footer">Gerado automaticamente pelo Sistema de QA Automatizado &copy; ${new Date().getFullYear()}</div>
 </div>
+
+<script>
+  let myChart = null;
+
+  // Variáveis injetadas pelo backend para o gráfico
+  const dataPassos = [${aprovados}, ${falhas}, ${total - aprovados - falhas}];
+  const dataAxe = [
+    ${axeViolations.filter(v => v.impact === 'minor').reduce((a,b)=>a+b.nodes.length,0)},
+    ${axeViolations.filter(v => v.impact === 'moderate').reduce((a,b)=>a+b.nodes.length,0)},
+    ${axeViolations.filter(v => v.impact === 'serious').reduce((a,b)=>a+b.nodes.length,0)},
+    ${axeViolations.filter(v => v.impact === 'critical').reduce((a,b)=>a+b.nodes.length,0)}
+  ];
+
+  function updateChart() {
+    const selector = document.getElementById('chartSelector');
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    
+    if (myChart) {
+      myChart.destroy();
+    }
+
+    if (selector.value === 'passos') {
+      myChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Aprovados', 'Falhas', 'Outros'],
+          datasets: [{
+            data: dataPassos,
+            backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
+            borderWidth: 2,
+            borderColor: '#ffffff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' }
+          }
+        }
+      });
+    } else if (selector.value === 'acessibilidade') {
+      myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Baixo', 'Moderado', 'Grave', 'Crítico'],
+          datasets: [{
+            label: 'Elementos Afetados',
+            data: dataAxe,
+            backgroundColor: ['#166534', '#92400e', '#991b1b', '#7f1d1d'],
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: { beginAtZero: true, ticks: { precision: 0 } }
+          }
+        }
+      });
+    }
+  }
+
+  function toggleEdit(btn) {
+    const page = document.getElementById('reportPage');
+    const isEditing = page.isContentEditable;
+    
+    if (isEditing) {
+      page.contentEditable = 'false';
+      document.body.classList.remove('editing');
+      btn.innerHTML = '✏️ Habilitar Edição';
+      btn.style.background = '#3b82f6';
+    } else {
+      page.contentEditable = 'true';
+      document.body.classList.add('editing');
+      btn.innerHTML = '💾 Desativar Edição';
+      btn.style.background = '#f59e0b';
+    }
+  }
+
+  // Inicializar o gráfico padrão
+  window.onload = () => {
+    updateChart();
+  };
+</script>
 </body>
 </html>`;
 }
