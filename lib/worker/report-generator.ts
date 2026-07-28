@@ -456,15 +456,42 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
     </div>
 
     <!-- GRÁFICOS DINÂMICOS -->
-    <div class="chart-container no-print">
-      <select id="chartSelector" class="chart-select" onchange="updateChart()">
-        <option value="passos">Métrica 1: Status de Execução dos Passos</option>
-        <option value="acessibilidade">Métrica 2: Violações de Acessibilidade (eMAG)</option>
-      </select>
-      <div style="width: 100%; max-width: 400px; aspect-ratio: 1/1;">
-        <canvas id="mainChart"></canvas>
+    <div class="dashboard-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 40px; page-break-inside: avoid;">
+      <div class="chart-box" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
+        <h3 style="text-align: center; font-size: 14px; margin-top: 0; color: #475569;">Status de Execução dos Passos</h3>
+        <div style="height: 250px; position: relative;"><canvas id="chartPassos"></canvas></div>
       </div>
-      <p style="font-size: 11px; color: #94a3b8; margin-top: 15px;">(Os gráficos são interativos e não aparecem na impressão final para manter o layout limpo)</p>
+      <div class="chart-box" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
+        <h3 style="text-align: center; font-size: 14px; margin-top: 0; color: #475569;">Violações de Acessibilidade (Severidade)</h3>
+        <div style="height: 250px; position: relative;"><canvas id="chartAxe"></canvas></div>
+      </div>
+    </div>
+
+    <!-- PRIORIDADES E PLANO DE AÇÃO -->
+    <div class="priorities-panel" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 40px; page-break-inside: avoid;">
+      <h2 style="margin-top: 0; color: #0f172a; font-size: 18px; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px;">Balanço Geral: Plano de Ação e Prioridades</h2>
+      ${axeViolations.length === 0 ? '<p style="color:#10b981;font-weight:600;">✅ Nenhuma ação corretiva técnica necessária no momento.</p>' : `
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px;">
+          <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 16px; border-radius: 8px;">
+            <h4 style="color: #991b1b; margin: 0 0 8px; font-size: 13px;">🚨 Prioridade Alta (Crítico/Grave)</h4>
+            <ul style="margin:0; padding-left: 20px; font-size: 12px; color: #7f1d1d; line-height: 1.6;">
+              ${axeViolations.filter(v => v.impact === 'critical' || v.impact === 'serious').map(v => `<li>${v.description}</li>`).join('') || '<li>Nenhuma ocorrência.</li>'}
+            </ul>
+          </div>
+          <div style="background: #fffbeb; border: 1px solid #fde68a; padding: 16px; border-radius: 8px;">
+            <h4 style="color: #92400e; margin: 0 0 8px; font-size: 13px;">⚠️ Prioridade Média (Moderado)</h4>
+            <ul style="margin:0; padding-left: 20px; font-size: 12px; color: #92400e; line-height: 1.6;">
+               ${axeViolations.filter(v => v.impact === 'moderate').map(v => `<li>${v.description}</li>`).join('') || '<li>Nenhuma ocorrência.</li>'}
+            </ul>
+          </div>
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 8px;">
+            <h4 style="color: #166534; margin: 0 0 8px; font-size: 13px;">ℹ️ Prioridade Baixa (Baixo)</h4>
+            <ul style="margin:0; padding-left: 20px; font-size: 12px; color: #14532d; line-height: 1.6;">
+               ${axeViolations.filter(v => v.impact === 'minor').map(v => `<li>${v.description}</li>`).join('') || '<li>Nenhuma ocorrência.</li>'}
+            </ul>
+          </div>
+        </div>
+      `}
     </div>
   </div>
 
@@ -504,58 +531,48 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
     ${axeViolations.filter(v => v.impact === 'critical').reduce((a,b)=>a+b.nodes.length,0)}
   ];
 
-  function updateChart() {
-    const selector = document.getElementById('chartSelector');
-    const ctx = document.getElementById('mainChart').getContext('2d');
+  function initCharts() {
+    const ctxPassos = document.getElementById('chartPassos').getContext('2d');
+    const ctxAxe = document.getElementById('chartAxe').getContext('2d');
     
-    if (myChart) {
-      myChart.destroy();
-    }
+    new Chart(ctxPassos, {
+      type: 'doughnut',
+      data: {
+        labels: ['Aprovados', 'Falhas', 'Outros'],
+        datasets: [{
+          data: dataPassos,
+          backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
+          borderWidth: 2,
+          borderColor: '#ffffff'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { position: 'bottom' } }
+      }
+    });
 
-    if (selector.value === 'passos') {
-      myChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-          labels: ['Aprovados', 'Falhas', 'Outros'],
-          datasets: [{
-            data: dataPassos,
-            backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
-            borderWidth: 2,
-            borderColor: '#ffffff'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'bottom' }
-          }
-        }
-      });
-    } else if (selector.value === 'acessibilidade') {
-      myChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: ['Baixo', 'Moderado', 'Grave', 'Crítico'],
-          datasets: [{
-            label: 'Elementos Afetados',
-            data: dataAxe,
-            backgroundColor: ['#166534', '#92400e', '#991b1b', '#7f1d1d'],
-            borderRadius: 6
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false }
-          },
-          scales: {
-            y: { beginAtZero: true, ticks: { precision: 0 } }
-          }
-        }
-      });
-    }
+    new Chart(ctxAxe, {
+      type: 'bar',
+      data: {
+        labels: ['Baixo', 'Moderado', 'Grave', 'Crítico'],
+        datasets: [{
+          label: 'Elementos Afetados',
+          data: dataAxe,
+          backgroundColor: ['#166534', '#92400e', '#991b1b', '#7f1d1d'],
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
   }
 
   function toggleEdit(btn) {
@@ -575,9 +592,9 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
     }
   }
 
-  // Inicializar o gráfico padrão
+  // Inicializar gráficos
   window.onload = () => {
-    updateChart();
+    initCharts();
   };
 </script>
 </body>
