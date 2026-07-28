@@ -939,6 +939,7 @@ export function QaClient({ projects }: QaClientProps) {
     test_cases: "Descreva a funcionalidade a ser testada...\n\nExemplo: Tela de login com e-mail e senha. O usuário pode recuperar a senha. Após 5 tentativas erradas, a conta é bloqueada por 10 minutos.",
     test_report: "Descreva o que foi testado e os resultados encontrados...\n\nExemplo: Testamos o fluxo de login. 2 bugs críticos encontrados: tela branca ao tentar login com e-mail inválido e botão de recuperação sem feedback visual.",
     smart_runner: "Cole uma URL para executar testes automatizados e gerar relatórios completos em background...",
+    batch_runner: "Adicione as URLs e especificações para a execução de testes em lote e geração de relatórios...",
   };
 
   return (
