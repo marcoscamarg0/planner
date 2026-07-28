@@ -88,7 +88,7 @@ async function generateStepsFromDescription(
     return directSteps.map(s => {
       const action = s.action as string;
       if (action === 'newPage' || action === 'screenshot') {
-        return { ...s, action: 'wait' as const, milliseconds: 1000 };
+        return { ...s, action: 'wait', milliseconds: 1000 } as unknown as SmartStep;
       }
       return s as unknown as SmartStep;
     });
