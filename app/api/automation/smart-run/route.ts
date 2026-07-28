@@ -84,8 +84,14 @@ async function generateStepsFromDescription(
   const directSteps = tryParseDirectSteps(flowDescription);
   if (directSteps) {
     console.log('[SmartRun] Usando ' + directSteps.length + ' passos do JSON fornecido diretamente (sem IA).');
-    // Normalize: newPage -> wait
-    return directSteps.map(s => s.action === 'newPage' ? { ...s, action: 'wait' as const, milliseconds: 1000 } : s);
+    // Normalize: newPage -> wait, screenshot -> wait
+    return directSteps.map(s => {
+      const action = s.action as string;
+      if (action === 'newPage' || action === 'screenshot') {
+        return { ...s, action: 'wait' as const, milliseconds: 1000 };
+      }
+      return s as unknown as SmartStep;
+    });
   }
 
   const modelMap: Record<string, string> = {
