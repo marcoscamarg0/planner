@@ -158,12 +158,11 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   };
 
   const PHASE_MESSAGES = [
-    "Analisando URL e gerando passos via IA...",
-    "Iniciando navegador headless...",
-    "Executando automação no site...",
-    "Capturando evidências de cada passo...",
-    "Rodando auditoria de acessibilidade (eMAG)...",
-    "Gerando relatório PDF...",
+    "Iniciando o SmartRunner... (Rodando em background, você pode fechar esta aba se quiser)",
+    "Lendo o fluxo de teste e gerando passos inteligentes...",
+    "Abrindo o navegador invisível e validando os seletores (Fique tranquilo, o teste continuará mesmo se sair)...",
+    "Navegando pela página e extraindo evidências visuais...",
+    "Isso pode levar alguns minutos dependendo do tamanho do fluxo. O resultado aparecerá no seu histórico lateral!",
   ];
 
   const loadPdfJs = (): Promise<any> => {

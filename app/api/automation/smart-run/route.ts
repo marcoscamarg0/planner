@@ -600,6 +600,28 @@ export async function POST(req: Request) {
       await logToStream('[SmartRun] Iniciando analise de fluxo para: ' + targetUrl);
       const steps = await generateStepsFromDescription(targetUrl, flowDescription, model, contextImages);
       await logToStream('[SmartRun] ' + steps.length + ' passos gerados.');
+      
+      const displayName = jobName || 'Auditoria de ' + new URL(targetUrl).hostname;
+      let reportId: string | null = null;
+
+      try {
+        const { data: insertedReport, error } = await supabase.from('qa_reports').insert({
+          user_id: user.id,
+          type: 'smart_runner',
+          title: 'Auditoria IA (Rodando): ' + displayName,
+          input_description: 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription,
+          framework: 'playwright',
+          model_used: model,
+          result_raw: JSON.stringify({ success: false, status: 'running', jobName: displayName }),
+          result_json: { success: false, status: 'running', jobName: displayName },
+        }).select('id').single();
+        if (!error && insertedReport) {
+           reportId = insertedReport.id;
+           await logToStream('[SmartRun] Teste registrado em background com ID: ' + reportId);
+        }
+      } catch (dbErr) {
+         await logToStream('[SmartRun] Falha inicial ao registrar no BD: ' + String(dbErr));
+      }
 
       const chromium = await getChromium();
       browser = await chromium.launch({
@@ -654,8 +676,6 @@ export async function POST(req: Request) {
 
       const approved   = stepResults.filter(r => r.status === 'aprovado').length;
       const failed     = stepResults.filter(r => r.status !== 'aprovado').length;
-      const displayName = jobName || 'Auditoria de ' + new URL(targetUrl).hostname;
-
       await logToStream('[SmartRun] Gerando relatorios HTML e PDF...');
       const htmlContent = buildReportHtml({ results: stepResults, axeViolations, targetUrl, jobName: displayName });
 
@@ -700,17 +720,26 @@ export async function POST(req: Request) {
       };
 
       try {
-        await supabase.from('qa_reports').insert({
-          user_id: user.id,
-          type: 'smart_runner',
-          title: 'Auditoria IA: ' + displayName,
-          input_description: 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription,
-          framework: 'playwright',
-          model_used: model,
-          result_raw: JSON.stringify(resultJsonData),
-          result_json: resultJsonData,
-        });
-        await logToStream('[SmartRun] Historico salvo no Supabase.');
+        if (reportId) {
+          await supabase.from('qa_reports').update({
+            title: 'Auditoria IA: ' + displayName,
+            result_raw: JSON.stringify(resultJsonData),
+            result_json: resultJsonData,
+          }).eq('id', reportId);
+          await logToStream('[SmartRun] Historico atualizado no Supabase.');
+        } else {
+          await supabase.from('qa_reports').insert({
+            user_id: user.id,
+            type: 'smart_runner',
+            title: 'Auditoria IA: ' + displayName,
+            input_description: 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription,
+            framework: 'playwright',
+            model_used: model,
+            result_raw: JSON.stringify(resultJsonData),
+            result_json: resultJsonData,
+          });
+          await logToStream('[SmartRun] Historico salvo no Supabase.');
+        }
       } catch (dbErr) {
         await logToStream('[SmartRun] Falha ao salvar no historico do BD: ' + String(dbErr));
       }
