@@ -736,7 +736,13 @@ export async function POST(req: Request) {
       const approved   = stepResults.filter(r => r.status === 'aprovado').length;
       const failed     = stepResults.filter(r => r.status !== 'aprovado').length;
       await logToStream('[SmartRun] Gerando relatorios HTML e PDF...');
-      const htmlContent = buildReportHtml({ results: stepResults, axeViolations, targetUrl, jobName: displayName });
+      const htmlContent = buildReportHtml({ 
+        results: stepResults, 
+        axeViolations, 
+        targetUrl, 
+        jobName: displayName,
+        plannedSteps: steps.map(s => s.label)
+      });
 
       const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
       if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });

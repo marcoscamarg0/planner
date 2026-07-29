@@ -21,6 +21,7 @@ interface ReportOptions {
   axeViolations: AxeViolation[];
   targetUrl: string;
   jobName: string;
+  plannedSteps?: string[];
 }
 
 function getStatusInfo(status: StatusBotao) {
@@ -203,7 +204,6 @@ export function buildReportHtml(opts: ReportOptions): string {
 
   const displayResults = relevantes.length > 0 ? relevantes : results;
 
-  // Pré-condições automáticas
   const preCondicoes = [
     'Navegador atualizado (Chrome / Edge / Firefox) com acesso à internet.',
     'URL de teste acessível publicamente: <code>' + targetUrl + '</code>.',
@@ -212,6 +212,30 @@ export function buildReportHtml(opts: ReportOptions): string {
   if (aprovados === total) {
     preCondicoes.push('Nenhuma autenticação obrigatória detectada nos fluxos testados.');
   }
+
+  // Seção do Caso de Teste Planejado
+  const casoDeTesteHtml = opts.plannedSteps && opts.plannedSteps.length > 0 
+    ? `
+      <div style="page-break-before:always"></div>
+      <h2 class="section-title">Plano de Teste (Caso de Teste)</h2>
+      <div class="test-case-panel" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:24px; margin-bottom:40px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <h3 style="margin-top:0; color:#3b82f6; font-size:16px; margin-bottom: 8px;">Passos Planejados</h3>
+        <p style="font-size:13px; color:#64748b; margin-bottom:20px;">O fluxo a seguir foi o roteiro planejado pela Inteligência Artificial e estruturado para execução na plataforma de testes.</p>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          ${opts.plannedSteps.map((step, idx) => `
+            <div style="display:flex; gap:16px; align-items:center; padding:12px 16px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+              <div style="flex-shrink:0; width:32px; height:32px; background:#eff6ff; color:#2563eb; font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center; border-radius:50%; border:1px solid #bfdbfe;">
+                ${idx + 1}
+              </div>
+              <div style="flex-grow:1; font-size:14px; color:#334155; font-weight:500; line-height:1.5;">
+                ${step}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `
+    : '';
 
   const passosHtml = displayResults.map((r, pos) => {
     const info = getStatusInfo(r.status as StatusBotao);
@@ -510,6 +534,9 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
   <!-- ACESSIBILIDADE -->
   <h2 class="section-title">Análise de Acessibilidade (eMAG / WCAG)</h2>
   ${axeHtml}
+
+  <!-- CASO DE TESTE -->
+  ${casoDeTesteHtml}
 
   <!-- EXECUÇÃO E EVIDÊNCIAS -->
   <div style="page-break-before:always"></div>
