@@ -6,7 +6,8 @@ import {
   Globe, Zap, Loader2, FileDown, Eye, CheckCircle2,
   AlertCircle, ChevronDown, Play, Sparkles, RefreshCw,
   Target, Shield, BarChart3, Clock, ArrowRight, List,
-  Image as ImageIcon, X, Edit3, FileText, Printer
+  Image as ImageIcon, X, Edit3, FileText, Printer, Upload,
+  Search, ShieldCheck, Link2Off, Bot, Activity, CheckCircle, Code
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -56,20 +57,20 @@ interface RunResult {
 // ──────────────────────────────────────────────────────────────────────────────
 const FLOW_EXAMPLES = [
   {
-    label: "Testar página inteira",
-    value: "Acesse a página, aceite cookies se aparecer, role a página inteira para baixo verificando todos os elementos visíveis, clique nos links principais do menu de navegação e capture cada estado.",
+    label: "Login Padrão",
+    value: "Acesse a página de login, preencha o formulário com credenciais válidas e verifique o redirecionamento para o dashboard.",
   },
   {
-    label: "Auditoria de acessibilidade",
-    value: "Acesse a URL, verifique se todos os botões possuem texto acessível, navegue pelas seções principais da página e verifique a estrutura de headings e links.",
+    label: "Busca e Navegação",
+    value: "Realize uma pesquisa na barra superior, acesse o primeiro resultado e verifique se o título condiz com a busca.",
   },
   {
-    label: "Fluxo de login",
-    value: "Acesse a página de login, preencha o campo de email com 'teste@exemplo.com', preencha a senha com 'Senha123', clique no botão de entrar e verifique se o login foi realizado.",
+    label: "Validação de Formulário",
+    value: "Tente enviar o formulário principal vazio e verifique se as mensagens de erro obrigatórias aparecem.",
   },
   {
-    label: "Navegação do menu",
-    value: "Acesse a homepage, clique em cada item do menu principal e verifique se as páginas carregam corretamente. Volte para a home entre cada item.",
+    label: "Auditoria de Acessibilidade/Layout",
+    value: "Role a página até o fim verificando quebras de layout, e teste o botão de voltar ao topo.",
   },
 ];
 
@@ -94,7 +95,8 @@ function StepBadge({ status }: { status: StepResult["status"] }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Componente principal
 // ──────────────────────────────────────────────────────────────────────────────
-export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | null }) {
+export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?: RunResult | null, onImportPdf?: (url: string) => void }) {
+  const [testType, setTestType]           = useState("smart_ai");
   const [targetUrl, setTargetUrl]         = useState("");
   const [flowDescription, setFlowDescription] = useState("");
   const [jobName, setJobName]             = useState("");
@@ -142,6 +144,41 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   };
 
   useEffect(() => { loadHistory(); }, []);
+
+  // Efeito para carregar o histórico baseado na URL atual
+  useEffect(() => {
+    const fetchUrlHistory = async () => {
+      if (!targetUrl || targetUrl.length < 5) {
+        setHistory([]);
+        return;
+      }
+      try {
+        setLoadingHistory(true);
+        const res = await fetch("/api/ai/qa");
+        if (res.ok) {
+          const data = await res.json();
+          // Filter dynamically based on the current URL
+          const urlObj = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`);
+          const domain = urlObj.hostname.replace('www.', '');
+          
+          const filtered = (data.reports || []).filter((r: any) => 
+            r.type === 'smart_runner' && 
+            r.result_json && 
+            r.result_json.targetUrl && 
+            r.result_json.targetUrl.includes(domain)
+          );
+          setHistory(filtered);
+        }
+      } catch (err) {
+        console.error("Erro ao buscar histórico:", err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+    
+    const timeoutId = setTimeout(fetchUrlHistory, 800);
+    return () => clearTimeout(timeoutId);
+  }, [targetUrl]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -220,7 +257,9 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   };
 
   const handleRun = async () => {
-    if (!targetUrl.trim() || !flowDescription.trim()) return;
+    if (!targetUrl.trim()) return;
+    if (testType === 'smart_ai' && !flowDescription.trim()) return;
+    
     setPhase("running");
     setResult(null);
     setErrorMsg(null);
@@ -248,7 +287,8 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
           jobName: jobName.trim() || undefined,
           model,
           includeAxe,
-          contextImages,
+          testType,
+          contextImages
         }),
       });
 
@@ -369,20 +409,23 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+    <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
 
       {/* ── Hero Header ──────────────────────────────────────── */}
-      <div className="text-center space-y-3">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-400 text-xs font-semibold">
-          <Zap className="w-3.5 h-3.5" />
-          Runner Inteligente
+      <div className="relative overflow-hidden rounded-3xl p-8 mb-8 bg-gradient-to-br from-indigo-900/20 via-violet-900/10 to-transparent border border-indigo-500/20 text-center">
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
+        <div className="relative z-10 space-y-4">
+          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-bold uppercase tracking-widest shadow-[0_0_15px_rgba(99,102,241,0.2)]">
+            <Zap className="w-4 h-4 text-indigo-400" />
+            Smart Runner Studio
+          </div>
+          <h2 className="text-3xl md:text-5xl font-extrabold text-foreground tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
+            Validação de Software com <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-400">Inteligência</span>
+          </h2>
+          <p className="text-sm md:text-base text-muted-foreground max-w-2xl mx-auto font-medium">
+            Escolha um tipo de teste, defina o alvo e deixe o robô fazer o trabalho duro. Ao final, obtenha evidências ricas e prontas para auditoria.
+          </p>
         </div>
-        <h2 className="text-2xl font-bold text-foreground">
-          Teste qualquer site com IA
-        </h2>
-        <p className="text-sm text-muted-foreground max-w-xl mx-auto">
-          Cole a URL e descreva o fluxo que quer testar. A IA gera o script Playwright, executa no servidor e te entrega um PDF completo com evidências de cada passo.
-        </p>
       </div>
 
       {/* ── Formulário ──────────────────────────────────────── */}
@@ -391,109 +434,166 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            className="glass rounded-2xl border border-border p-6 space-y-5"
+            className="rounded-3xl border border-white/5 bg-black/40 backdrop-blur-2xl p-6 md:p-8 space-y-8 shadow-2xl"
           >
-            {/* URL */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                URL do Site
+            {/* Seção 1: URL */}
+            <div className="space-y-2.5">
+              <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest ml-1">
+                Alvo (URL)
               </label>
-              <div className="relative">
-                <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <div className="relative group">
+                <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-indigo-400 transition-colors" />
                 <input
                   type="url"
                   value={targetUrl}
                   onChange={e => setTargetUrl(e.target.value)}
-                  placeholder="https://www.exemplo.gov.br"
-                  className="w-full pl-9 pr-4 py-3 rounded-xl bg-background/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 transition-all"
+                  placeholder="https://www.exemplo.com.br"
+                  className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white/5 border border-white/10 text-base font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 focus:bg-white/10 focus:ring-4 focus:ring-indigo-500/10 transition-all"
                 />
               </div>
             </div>
 
-            {/* Nome do relatório (opcional) */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Nome do Relatório <span className="text-muted-foreground/60 font-normal">(opcional)</span>
+            {/* Seção 2: Tipo de Teste */}
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest ml-1">
+                Motor de Execução
               </label>
-              <input
-                type="text"
-                value={jobName}
-                onChange={e => setJobName(e.target.value)}
-                placeholder="Ex: Auditoria CDT Gov.br"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 transition-all"
-              />
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {[
+                  { key: 'smart_ai', title: 'Exploração IA', desc: 'Agente LLM interativo', icon: Bot, color: 'from-violet-500/20 to-indigo-500/20', border: 'border-violet-500/30', text: 'text-violet-400' },
+                  { key: 'seo', title: 'Auditoria SEO', desc: 'Validação de Meta e Tags', icon: Search, color: 'from-emerald-500/20 to-teal-500/20', border: 'border-emerald-500/30', text: 'text-emerald-400' },
+                  { key: 'accessibility', title: 'Acessibilidade', desc: 'Análise eMAG/WCAG', icon: ShieldCheck, color: 'from-blue-500/20 to-cyan-500/20', border: 'border-blue-500/30', text: 'text-blue-400' },
+                  { key: 'broken_links', title: 'Links Quebrados', desc: 'Varredura de falhas 404', icon: Link2Off, color: 'from-rose-500/20 to-pink-500/20', border: 'border-rose-500/30', text: 'text-rose-400' }
+                ].map(t => {
+                  const Icon = t.icon;
+                  const isActive = testType === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      onClick={() => setTestType(t.key)}
+                      className={cn(
+                        "relative flex flex-col items-start p-4 rounded-2xl border text-left transition-all duration-300 overflow-hidden group",
+                        isActive ? `bg-gradient-to-br ${t.color} ${t.border} shadow-[0_0_20px_rgba(0,0,0,0.1)]` : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"
+                      )}
+                    >
+                      {isActive && <div className="absolute inset-0 bg-white/5 opacity-50 mix-blend-overlay pointer-events-none"></div>}
+                      <div className={cn("p-2 rounded-xl mb-3 transition-colors", isActive ? "bg-white/10" : "bg-white/5 group-hover:bg-white/10")}>
+                        <Icon className={cn("w-5 h-5", isActive ? t.text : "text-muted-foreground")} />
+                      </div>
+                      <h4 className={cn("font-bold text-sm", isActive ? "text-foreground" : "text-foreground/80")}>{t.title}</h4>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Fluxo de teste */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Descreva o Fluxo que Quer Testar
-                </label>
-                <div className="flex gap-1.5 flex-wrap justify-end">
-                  {FLOW_EXAMPLES.map(ex => (
-                    <button
-                      key={ex.label}
-                      onClick={() => setFlowDescription(ex.value)}
-                      className="text-[10px] px-2 py-0.5 rounded-full border border-violet-500/30 text-violet-400 hover:bg-violet-500/10 transition-all"
-                    >
-                      {ex.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <textarea
-                value={flowDescription}
-                onChange={e => setFlowDescription(e.target.value)}
-                rows={4}
-                placeholder={`Descreva o que quer testar em linguagem natural. Exemplos:\n\n• Acesse a página, aceite cookies, role a tela e clique nos botões principais\n• Teste o fluxo de login com email e senha\n• Verifique se o menu de navegação funciona corretamente`}
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 transition-all resize-none font-sans"
-              />
-              
-              {/* Image/PDF Upload */}
-              <div className="pt-2">
-                <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,application/pdf" className="hidden" />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isProcessingFile}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-violet-500/30 transition-all disabled:opacity-50"
-                >
-                  {isProcessingFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImageIcon className="w-3.5 h-3.5" />}
-                  Anexar Tela ou PDF (Opcional)
-                </button>
-                {contextImages.length > 0 && (
-                  <div className="flex gap-2 flex-wrap mt-3">
-                    {contextImages.map((img, idx) => (
-                      <div key={idx} className="relative group">
-                        <img src={img} alt={`Context ${idx}`} className="h-16 w-16 object-cover rounded-lg border border-border shadow-sm" />
-                        <button
-                          onClick={() => setContextImages(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute -top-2 -right-2 w-5 h-5 bg-background border border-border rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-500/10 hover:text-rose-500"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
+            {testType === 'smart_ai' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <Code className="w-4 h-4 text-indigo-400" />
+                    Fluxo de Teste / Script
+                  </label>
+                  <div className="flex gap-2 flex-wrap items-center">
+                    {FLOW_EXAMPLES.map((ex, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setFlowDescription(ex.value)}
+                        className="text-[10px] font-semibold px-2 py-1 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 hover:border-indigo-500/40 transition-all uppercase tracking-wider"
+                      >
+                        {ex.label}
+                      </button>
                     ))}
                   </div>
-                )}
+                </div>
+                <textarea
+                  value={flowDescription}
+                  onChange={(e) => setFlowDescription(e.target.value)}
+                  placeholder="Descreva o fluxo que a IA deve executar na página..."
+                  className="w-full h-32 px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm text-foreground focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 transition-all resize-none font-mono placeholder:text-muted-foreground/50 shadow-inner"
+                />
+              </div>
+            )}
+              
+            {testType === 'smart_ai' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4 text-indigo-400" />
+                    Imagens de Contexto <span className="text-muted-foreground/60 font-medium normal-case text-[10px] ml-1">(Opcional)</span>
+                  </label>
+                </div>
+                <div className="border border-dashed border-white/20 rounded-2xl p-6 bg-white/5 flex flex-col items-center justify-center gap-3 transition-colors hover:bg-white/10 hover:border-indigo-500/30 relative group overflow-hidden">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={handleFileUpload}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    title="Envie uma imagem ou PDF (Max 5 pags)"
+                  />
+                  <div className="w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center group-hover:scale-110 group-hover:bg-indigo-500/20 transition-all">
+                    {isProcessingFile ? (
+                      <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                    ) : (
+                      <Upload className="w-6 h-6 text-indigo-400" />
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-semibold text-foreground">Arraste telas ou PDFs de protótipo</p>
+                    <p className="text-xs text-muted-foreground mt-1">A IA usará como referência visual (Máx 5 pág)</p>
+                  </div>
+                    
+                  {contextImages.length > 0 && (
+                    <div className="flex flex-wrap justify-center gap-3 mt-4 pt-4 border-t border-white/10 w-full relative z-20">
+                      {contextImages.map((img, i) => (
+                        <div key={i} className="relative w-16 h-16 rounded-xl overflow-hidden border border-white/20 shadow-lg group/img">
+                          <img src={img} alt={`Context ${i}`} className="w-full h-full object-cover transition-transform group-hover/img:scale-110" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                            <button
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setContextImages(prev => prev.filter((_, idx) => idx !== i)); }}
+                              className="bg-rose-500 text-white rounded-full p-1.5 hover:scale-110 transition-transform"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2.5 pt-2">
+              <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest ml-1">
+                Nome da Execução <span className="text-muted-foreground/60 font-medium normal-case text-[10px] ml-1">(opcional)</span>
+              </label>
+              <div className="relative group">
+                <Target className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-indigo-400 transition-colors" />
+                <input
+                  type="text"
+                  value={jobName}
+                  onChange={e => setJobName(e.target.value)}
+                  placeholder="Ex: Validação do fluxo de Login"
+                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all placeholder:text-muted-foreground/50"
+                />
               </div>
             </div>
 
-            {/* Opções */}
-
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              {/* Modelo */}
-              <div className="relative">
+            <div className="flex flex-col sm:flex-row items-center gap-4 pt-4 border-t border-white/10">
+              {/* Seletor de Modelo */}
+              <div className="relative w-full sm:w-auto">
                 <button
                   onClick={() => setShowModelMenu(!showModelMenu)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl glass border border-border text-sm hover:border-violet-500/40 transition-all"
+                  className="w-full sm:w-auto flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-sm font-medium transition-all"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                  <span className="font-medium text-foreground">{currentModel.label}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-medium">
-                    {currentModel.badge}
-                  </span>
-                  <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", showModelMenu && "rotate-180")} />
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-indigo-400" />
+                    <span>{currentModel.label}</span>
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </button>
                 <AnimatePresence>
                   {showModelMenu && (
@@ -501,22 +601,22 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                       initial={{ opacity: 0, y: -8, scale: 0.96 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                      className="absolute left-0 mt-2 w-72 rounded-xl glass border border-border shadow-2xl z-50 overflow-hidden"
+                      className="absolute left-0 bottom-full mb-2 w-72 rounded-2xl bg-black/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-50 overflow-hidden"
                     >
                       {MODELS.map(m => (
                         <button
                           key={m.key}
                           onClick={() => { setModel(m.key); setShowModelMenu(false); }}
                           className={cn(
-                            "w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-accent/50 transition-colors",
-                            model === m.key && "bg-primary/10 text-primary"
+                            "w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors",
+                            model === m.key && "bg-indigo-500/10"
                           )}
                         >
                           <div className="flex-1">
-                            <p className="font-medium">{m.label}</p>
-                            <p className="text-xs text-muted-foreground">{m.provider} · {m.badge}</p>
+                            <p className={cn("font-medium", model === m.key ? "text-indigo-400" : "text-foreground")}>{m.label}</p>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">{m.provider} · {m.badge}</p>
                           </div>
-                          {model === m.key && <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />}
+                          {model === m.key && <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />}
                         </button>
                       ))}
                     </motion.div>
@@ -541,7 +641,7 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
               {/* Botão principal */}
               <button
                 onClick={handleRun}
-                disabled={!targetUrl.trim() || !flowDescription.trim()}
+                disabled={!targetUrl.trim() || (testType === 'smart_ai' && !flowDescription.trim())}
                 className="flex items-center gap-2 px-6 py-3 bg-violet-500 text-white rounded-xl text-sm font-semibold hover:bg-violet-600 disabled:opacity-40 transition-all shadow-lg shadow-violet-500/30 ml-auto"
               >
                 <Play className="w-4 h-4" />
@@ -570,6 +670,89 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
         )}
       </AnimatePresence>
 
+      {/* ── Histórico do Alvo Filtrado ──────────────────────── */}
+      <AnimatePresence>
+        {(phase === "idle" || phase === "error") && targetUrl.length >= 5 && history.length > 0 && !loadingHistory && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            className="rounded-3xl border border-white/5 bg-black/40 backdrop-blur-2xl p-6 md:p-8 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart3 className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-lg font-bold text-foreground">Histórico do Alvo</h3>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+                {history.length} execuções
+              </span>
+            </div>
+            
+            <p className="text-sm text-muted-foreground mb-4">
+              Execuções anteriores encontradas para este site.
+            </p>
+
+            <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5">
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-white/5 border-b border-white/10 text-xs uppercase tracking-wider text-muted-foreground/80">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Data/Hora</th>
+                    <th className="px-4 py-3 font-semibold">Nome do Teste</th>
+                    <th className="px-4 py-3 font-semibold">Motor (Tipo)</th>
+                    <th className="px-4 py-3 font-semibold text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {history.map((item: any) => {
+                    const rj = item.result_json || {};
+                    const steps = rj.steps || [];
+                    const failed = rj.failedSteps ?? steps.filter((s: any) => s.status !== 'aprovado').length;
+                    const isSuccess = failed === 0;
+                    const dateObj = new Date(item.created_at);
+                    const formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ' + dateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    const testName = item.title?.replace('Auditoria IA: ', '') || 'Execução SmartRunner';
+                    const motor = item.model_used || 'Desconhecido';
+
+                    return (
+                      <tr key={item.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3">
+                          <span className={cn(
+                            "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
+                            isSuccess 
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                              : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                          )}>
+                            {isSuccess ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                            {isSuccess ? "Aprovado" : "Falhou"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{formattedDate}</td>
+                        <td className="px-4 py-3 font-medium text-foreground truncate max-w-[200px]">{testName}</td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs">{motor}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {rj.htmlReportUrl && (
+                              <a href={rj.htmlReportUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-indigo-400 bg-white/5 hover:bg-indigo-500/10 rounded-md transition-colors" title="Ver HTML">
+                                <Eye className="w-4 h-4" />
+                              </a>
+                            )}
+                            {rj.pdfUrl && (
+                              <a href={rj.pdfUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-violet-400 bg-white/5 hover:bg-violet-500/10 rounded-md transition-colors" title="Baixar PDF">
+                                <FileDown className="w-4 h-4" />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Tela de Progresso ──────────────────────────────── */}
       <AnimatePresence>
         {phase === "running" && (
@@ -577,20 +760,22 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0 }}
-            className="glass rounded-2xl border border-violet-500/30 p-8 text-center space-y-6"
+            className="rounded-3xl border border-indigo-500/30 bg-black/60 backdrop-blur-3xl p-10 text-center space-y-8 shadow-[0_0_50px_rgba(99,102,241,0.15)] relative overflow-hidden"
           >
-            {/* Spinner animado */}
-            <div className="relative w-20 h-20 mx-auto">
-              <div className="absolute inset-0 rounded-full bg-violet-500/20 animate-ping" />
-              <div className="absolute inset-2 rounded-full bg-violet-500/30 animate-pulse" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Zap className="w-8 h-8 text-violet-400" />
+            <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none"></div>
+            
+            {/* Spinner animado avançado */}
+            <div className="relative w-24 h-24 mx-auto">
+              <div className="absolute inset-0 rounded-full border-t-2 border-indigo-400 animate-spin" style={{ animationDuration: '3s' }}></div>
+              <div className="absolute inset-2 rounded-full border-r-2 border-violet-400 animate-spin" style={{ animationDuration: '2s', animationDirection: 'reverse' }}></div>
+              <div className="absolute inset-4 rounded-full bg-indigo-500/20 animate-pulse flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.5)]">
+                <Activity className="w-8 h-8 text-indigo-300" />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-foreground">Executando Automação</p>
-              <p className="text-sm text-violet-400 animate-pulse">{currentPhaseMsg}</p>
+            <div className="space-y-3 relative z-10">
+              <p className="text-xl font-bold text-foreground tracking-wide">Executando Automação Inteligente</p>
+              <p className="text-sm font-medium text-indigo-400 animate-pulse">{currentPhaseMsg}</p>
             </div>
 
             {/* Timer */}
@@ -600,31 +785,36 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
             </div>
 
             {/* Steps de progresso visual */}
-            <div className="flex items-center justify-center gap-2 flex-wrap">
+            <div className="flex items-center justify-center gap-2 md:gap-4 flex-wrap relative z-10">
               {[
                 { icon: Globe,     label: "Acessando URL" },
-                { icon: Sparkles,  label: "IA Gerando Passos" },
+                { icon: Sparkles,  label: "Gerando Passos" },
                 { icon: Play,      label: "Executando" },
-                { icon: Shield,    label: "Auditoria eMAG" },
-                { icon: FileDown,  label: "Gerando PDF" },
+                { icon: Shield,    label: "Auditoria" },
+                { icon: FileDown,  label: "Evidências" },
               ].map((s, i) => {
                 const Icon = s.icon;
                 const isActive = Math.floor(elapsed / 8) === i;
                 const isDone   = Math.floor(elapsed / 8) > i;
                 return (
-                  <div key={i} className="flex items-center gap-1">
-                    <div className={cn(
-                      "w-7 h-7 rounded-full flex items-center justify-center border transition-all",
-                      isDone  ? "bg-emerald-500/20 border-emerald-500/40" :
-                      isActive? "bg-violet-500/20 border-violet-500/40 animate-pulse" :
-                               "bg-muted/30 border-border"
-                    )}>
-                      {isDone
-                        ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                        : <Icon className={cn("w-3.5 h-3.5", isActive ? "text-violet-400" : "text-muted-foreground")} />
-                      }
+                  <div key={i} className="flex items-center gap-2 md:gap-4">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={cn(
+                        "w-10 h-10 rounded-2xl flex items-center justify-center border transition-all duration-500",
+                        isDone  ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)]" :
+                        isActive? "bg-indigo-500/20 border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" :
+                                 "bg-white/5 border-white/10"
+                      )}>
+                        {isDone
+                          ? <CheckCircle className="w-5 h-5 text-emerald-400" />
+                          : <Icon className={cn("w-5 h-5", isActive ? "text-indigo-400 animate-pulse" : "text-muted-foreground")} />
+                        }
+                      </div>
+                      <span className={cn("text-[10px] font-bold uppercase tracking-wider hidden md:block", isDone ? "text-emerald-400" : isActive ? "text-indigo-400" : "text-muted-foreground/50")}>
+                        {s.label}
+                      </span>
                     </div>
-                    {i < 4 && <ArrowRight className="w-3 h-3 text-muted-foreground/40" />}
+                    {i < 4 && <div className={cn("w-4 md:w-8 h-[2px] rounded-full", isDone ? "bg-emerald-500/50" : "bg-white/10")} />}
                   </div>
                 );
               })}
@@ -664,17 +854,21 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-4"
+            className="space-y-6"
           >
             {/* Status header */}
-            <div className="glass rounded-2xl border border-emerald-500/30 p-5 flex items-center justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            <div className="rounded-3xl border border-emerald-500/20 bg-emerald-500/5 p-6 flex items-center justify-between flex-wrap gap-4 shadow-[0_0_30px_rgba(16,185,129,0.05)] relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[80px] rounded-full pointer-events-none -mr-32 -mt-32"></div>
+              <div className="flex items-center gap-4 relative z-10">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                  <CheckCircle className="w-7 h-7 text-emerald-400" />
                 </div>
                 <div>
-                  <p className="font-semibold text-foreground">{result.jobName}</p>
-                  <p className="text-xs text-muted-foreground">{result.targetUrl} · {formatTime(elapsed)} de execução</p>
+                  <p className="text-lg font-bold text-foreground">{result.jobName}</p>
+                  <p className="text-sm text-emerald-400/80 font-medium flex items-center gap-2">
+                    <Globe className="w-3.5 h-3.5" />
+                    {result.targetUrl} <span className="text-muted-foreground/50 mx-1">•</span> {formatTime(elapsed)} decorridos
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -702,6 +896,15 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
                     <FileDown className="w-4 h-4" />
                     PDF Original
                   </a>
+                )}
+                {result.pdfUrl && onImportPdf && (
+                  <button
+                    onClick={() => onImportPdf(result.pdfUrl!)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20 border border-indigo-500/30 text-sm font-semibold transition-all shadow-sm"
+                  >
+                    <FileText className="w-4 h-4" />
+                    📝 Analisar PDF em Relatórios
+                  </button>
                 )}
                 {result.htmlReportUrl && (
                   <a
@@ -800,19 +1003,20 @@ export function SmartRunnerTab({ initialReport }: { initialReport?: RunResult | 
             </AnimatePresence>
 
             {/* Métricas */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: "Total de Passos", value: result.totalSteps,          color: "text-primary",    bg: "bg-primary/10",    icon: Target },
-                { label: "Aprovados",       value: result.approvedSteps,       color: "text-emerald-400",bg: "bg-emerald-400/10",icon: CheckCircle2 },
-                { label: "Falhas",          value: result.failedSteps,         color: "text-rose-400",   bg: "bg-rose-400/10",   icon: AlertCircle },
-                { label: "Violações eMAG",  value: result.axeViolationsCount,  color: "text-amber-400",  bg: "bg-amber-400/10",  icon: Shield },
+                { label: "Total de Passos", value: result.totalSteps,          color: "text-indigo-400",    border: "border-indigo-500/20",   bg: "bg-indigo-500/10",    icon: Target },
+                { label: "Aprovados",       value: result.approvedSteps,       color: "text-emerald-400",   border: "border-emerald-500/20",  bg: "bg-emerald-500/10",   icon: CheckCircle },
+                { label: "Falhas",          value: result.failedSteps,         color: "text-rose-400",      border: "border-rose-500/20",     bg: "bg-rose-500/10",      icon: AlertCircle },
+                { label: "Violações",       value: result.axeViolationsCount,  color: "text-amber-400",     border: "border-amber-500/20",    bg: "bg-amber-500/10",     icon: Shield },
               ].map(m => {
                 const Icon = m.icon;
                 return (
-                  <div key={m.label} className={cn("rounded-xl p-4 text-center border border-border/50", m.bg)}>
-                    <Icon className={cn("w-5 h-5 mx-auto mb-2", m.color)} />
-                    <p className={cn("text-2xl font-bold", m.color)}>{m.value}</p>
-                    <p className="text-xs text-muted-foreground mt-1 font-medium">{m.label}</p>
+                  <div key={m.label} className={cn("relative group overflow-hidden rounded-2xl p-5 border text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-xl", m.border, "bg-white/5")}>
+                    <div className={cn("absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none", m.bg)}></div>
+                    <Icon className={cn("w-6 h-6 mx-auto mb-3", m.color)} />
+                    <p className={cn("text-3xl font-extrabold tracking-tight", m.color)}>{m.value}</p>
+                    <p className="text-xs text-muted-foreground mt-1.5 font-bold uppercase tracking-widest">{m.label}</p>
                   </div>
                 );
               })}

@@ -40,7 +40,7 @@ const SMART_RUN_SYSTEM_PROMPT = [
   'Sua tarefa é analisar o fluxo ou script fornecido pelo usuário e gerar um array JSON de passos de automação ALTAMENTE PRECISOS E COMPLEXOS.',
   '',
   'REGRAS AVANÇADAS:',
-  '1. GRANULARIDADE EXTREMA (MÍNIMO DE 30 PASSOS): Divida a automação no maior nível de detalhe possível. Para atingir pelo menos 30 passos, adicione rolagens (scroll), interações de visualização (hover), cliques exploratórios em menus, checagem de textos auxiliares na tela, e pausas explícitas de processamento após cada etapa relevante.',
+  '1. GRANULARIDADE E PRECISÃO: Divida a automação no nível de detalhe adequado. Adicione pausas explícitas de processamento após etapas que exigem navegação ou carregamento. NÃO crie passos fictícios apenas para alongar o teste.',
   '2. MAPEAMENTO REFINADO:',
   '   - getByRole("link",{name:"X"}) -> { "action":"click", "selectorType":"role", "selector":"link", "value":"X", "label":"Clicar no link X" }',
   '   - getByRole("button",{name:"Y"}) -> { "action":"click", "selectorType":"role", "selector":"button", "value":"Y", "label":"Clicar no botão Y" }',
@@ -50,7 +50,7 @@ const SMART_RUN_SYSTEM_PROMPT = [
   '4. ESPERAS INTELIGENTES: Sempre que houver uma navegação, clique importante ou submissão, inclua obrigatoriamente um passo extra { "action":"wait", "milliseconds": 2500, "label":"Aguardar processamento e renderização da página" } logo após a ação.',
   '5. SEM NOVAS PÁGINAS: NÃO inclua a action "newPage". Se houver abertura de popup ou nova aba, trate como { "action":"wait", "milliseconds":1500, "label":"Aguardar carregamento da nova guia" }.',
   '6. LABELS PROFISSIONAIS: "label" deve ser escrito de forma técnica em português, detalhando a ação (Ex: "Acessar o portal principal", "Preencher credenciais no formulário", "Validar carregamento do modal").',
-  '7. COBERTURA TOTAL E EXAUSTIVA: Expanda o script do usuário ao máximo! Adicione passos de validação visual e scroll. É OBRIGATÓRIO gerar PELO MENOS 30 passos JSON, intercalando cliques, scolls e waits.',
+  '7. FOCO FUNCIONAL: Foque em mapear interações reais (links importantes, botões de ação, formulários). Evite adicionar dezenas de cliques em textos não interativos ou widgets de feedback irrelevantes.',
   '8. LIBERAÇÃO DE COOKIES: O PRIMEIRO passo de interação (logo após o "goto" e o "wait" inicial) DEVE OBRIGATORIAMENTE ser uma tentativa de aceitar cookies ou fechar banners de privacidade, mesmo que o usuário não tenha pedido. Use { "action": "click", "selectorType": "text", "selector": "Aceitar", "label": "Aceitar cookies e políticas de privacidade" }.',
   '9. RETORNO DE ABA (MUITO IMPORTANTE): Toda vez que o fluxo clicar em um link que sai da página original (como redes sociais, Facebook, WhatsApp, Twitter, etc) ou que abre uma aba nova, O PASSO SEGUINTE DEVE SER FECHAR ESSA ABA E VOLTAR PARA A ORIGINAL. Use a action especial: { "action": "closePopups", "label": "Fechar aba externa e retornar à página original" }.',
   '',
@@ -405,8 +405,14 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     }
 
     if (!locator) {
-      // Last resort: use original page locator (will timeout naturally if not found)
+      // Last resort: use original page locator
       locator = buildLocator(activePage);
+    }
+
+    try {
+      await locator.waitFor({ state: 'attached', timeout: 8000 });
+    } catch {
+      throw new Error(`Elemento não encontrado: ${step.selector || step.value}`);
     }
 
     await autoAcceptCookies(targetPage);
@@ -451,18 +457,18 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       const pageCountBefore = page.context().pages().length;
 
       if (step.isPopup) {
-        const popup = targetPage.waitForEvent('popup', { timeout: 15000 }).catch(() => null);
+        const popup = targetPage.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
         try {
-          await locator.click({ force: true, timeout: 10000 });
+          await locator.click({ force: true, timeout: 5000 });
         } catch {
-          await locator.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+          await locator.evaluate((el: HTMLElement) => el.click()); // No catch to allow error to propagate if it fails
         }
         await popup;
       } else {
         try {
-          await locator.click({ force: true, timeout: 10000 });
+          await locator.click({ force: true, timeout: 5000 });
         } catch {
-          await locator.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+          await locator.evaluate((el: HTMLElement) => el.click());
         }
       }
       await Promise.race([
@@ -591,17 +597,30 @@ export async function POST(req: Request) {
       if (!user) throw new Error('Nao autorizado');
 
       const body = await req.json();
-      const { targetUrl, flowDescription, jobName, model = 'auto-free', includeAxe = true, contextImages = [] } = body;
+      const { targetUrl, flowDescription, jobName, model = 'auto-free', includeAxe = true, contextImages = [], testType = 'smart_ai' } = body;
 
-      if (!targetUrl || !flowDescription) {
-        throw new Error('targetUrl e flowDescription sao obrigatorios');
+      if (!targetUrl) {
+        throw new Error('targetUrl é obrigatorio');
+      }
+      if (testType === 'smart_ai' && !flowDescription) {
+        throw new Error('flowDescription é obrigatorio para testes de IA');
       }
 
-      await logToStream('[SmartRun] Iniciando analise de fluxo para: ' + targetUrl);
-      const steps = await generateStepsFromDescription(targetUrl, flowDescription, model, contextImages);
-      await logToStream('[SmartRun] ' + steps.length + ' passos gerados.');
+      await logToStream(`[SmartRun] Iniciando teste (${testType}) para: ` + targetUrl);
       
-      const displayName = jobName || 'Auditoria de ' + new URL(targetUrl).hostname;
+      let steps: SmartStep[] = [];
+      if (testType === 'smart_ai') {
+        steps = await generateStepsFromDescription(targetUrl, flowDescription, model, contextImages);
+        await logToStream('[SmartRun] ' + steps.length + ' passos gerados pela IA.');
+      }
+      
+      const typeLabelMap: Record<string, string> = {
+        smart_ai: 'IA',
+        accessibility: 'Acessibilidade',
+        seo: 'SEO',
+        broken_links: 'Links Quebrados'
+      };
+      const displayName = jobName || `Auditoria ${typeLabelMap[testType] || testType}: ` + new URL(targetUrl).hostname;
       let reportId: string | null = null;
 
       try {
@@ -609,7 +628,7 @@ export async function POST(req: Request) {
           user_id: user.id,
           type: 'smart_runner',
           title: 'Auditoria IA (Rodando): ' + displayName,
-          input_description: 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription,
+          input_description: (testType === 'smart_ai' ? 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription : `Teste Automático (${typeLabelMap[testType]}) em ${targetUrl}`),
           framework: 'playwright',
           model_used: model,
           result_raw: JSON.stringify({ success: false, status: 'running', jobName: displayName }),
@@ -658,11 +677,51 @@ export async function POST(req: Request) {
       }
 
       const stepResults: StepResult[] = [];
-      for (let i = 0; i < steps.length; i++) {
-        await logToStream('[SmartRun] Passo ' + (i + 1) + '/' + steps.length + ': ' + steps[i].label);
-        const r = await runStep(page, steps[i], i + 1, targetUrl);
-        await logToStream(' -> ' + (r.status === 'aprovado' ? 'Aprovado' : 'Falhou') + ' - ' + r.detalhe);
-        stepResults.push(r);
+
+      if (testType === 'smart_ai') {
+        for (let i = 0; i < steps.length; i++) {
+          await logToStream('[SmartRun] Passo ' + (i + 1) + '/' + steps.length + ': ' + steps[i].label);
+          const r = await runStep(page, steps[i], i + 1, targetUrl);
+          await logToStream(' -> ' + (r.status === 'aprovado' ? 'Aprovado' : 'Falhou') + ' - ' + r.detalhe);
+          stepResults.push(r);
+        }
+      } else if (testType === 'seo') {
+        await logToStream('[SmartRun] Executando verificações de SEO...');
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const title = await page.title();
+        stepResults.push({ index: 1, label: 'Validar Tag <title>', status: title ? 'aprovado' : 'falha_clique', detalhe: title ? `Encontrado: "${title}"` : 'Ausente', duration: 100 });
+        
+        const desc = await page.locator('meta[name="description"]').getAttribute('content').catch(() => null);
+        stepResults.push({ index: 2, label: 'Validar Meta Description', status: desc ? 'aprovado' : 'falha_clique', detalhe: desc ? `Encontrado: "${desc}"` : 'Ausente', duration: 50 });
+        
+        const ogTitle = await page.locator('meta[property="og:title"]').getAttribute('content').catch(() => null);
+        stepResults.push({ index: 3, label: 'Validar OpenGraph Title', status: ogTitle ? 'aprovado' : 'falha_clique', detalhe: ogTitle ? `Encontrado: "${ogTitle}"` : 'Ausente', duration: 50 });
+        
+        const h1Count = await page.locator('h1').count();
+        stepResults.push({ index: 4, label: 'Validar presença de <h1>', status: h1Count === 1 ? 'aprovado' : 'falha_clique', detalhe: h1Count === 1 ? 'Exatamente 1 <h1> encontrado.' : `${h1Count} tags <h1> encontradas (ideal: 1).`, duration: 50 });
+      } else if (testType === 'broken_links') {
+        await logToStream('[SmartRun] Executando verificação de links...');
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const links = await page.evaluate(() => Array.from(document.querySelectorAll('a[href]')).map(a => (a as HTMLAnchorElement).href));
+        const uniqueLinks = Array.from(new Set(links)).filter(l => l.startsWith('http')).slice(0, 15); // limit to 15 to avoid long times
+        
+        await logToStream(`[SmartRun] ${uniqueLinks.length} links unicos encontrados para teste.`);
+        for (let i = 0; i < uniqueLinks.length; i++) {
+          const url = uniqueLinks[i];
+          const start = Date.now();
+          let ok = false;
+          let msg = '';
+          try {
+            const r = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).catch(() => fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) }));
+            ok = r && r.ok;
+            msg = r ? `Status ${r.status}` : 'Falha na requisição';
+          } catch (e: any) {
+            msg = e.message || 'Timeout/Erro';
+          }
+          stepResults.push({ index: i + 1, label: `Validar link: ${url.slice(0, 50)}...`, status: ok ? 'aprovado' : 'falha_clique', detalhe: msg, duration: Date.now() - start });
+        }
+      } else if (testType === 'accessibility') {
+         stepResults.push({ index: 1, label: 'Auditoria de Acessibilidade (Axe)', status: axeViolations.length === 0 ? 'aprovado' : 'falha_clique', detalhe: axeViolations.length === 0 ? 'Nenhuma violação encontrada.' : `${axeViolations.length} violações encontradas. Veja o detalhamento no topo do relatório.`, duration: 5000 });
       }
 
       let finalScreenshot: string | undefined;
@@ -719,12 +778,23 @@ export async function POST(req: Request) {
         finalScreenshot,
       };
 
+      // Create a stripped version without heavy base64 images for the database
+      const resultJsonDataForDb = { ...resultJsonData };
+      delete resultJsonDataForDb.finalScreenshot;
+      if (resultJsonDataForDb.steps) {
+        resultJsonDataForDb.steps = resultJsonDataForDb.steps.map(s => {
+          const sCopy = { ...s };
+          delete sCopy.screenshotBase64;
+          return sCopy;
+        });
+      }
+
       try {
         if (reportId) {
           await supabase.from('qa_reports').update({
             title: 'Auditoria IA: ' + displayName,
-            result_raw: JSON.stringify(resultJsonData),
-            result_json: resultJsonData,
+            result_raw: JSON.stringify(resultJsonDataForDb),
+            result_json: resultJsonDataForDb,
           }).eq('id', reportId);
           await logToStream('[SmartRun] Historico atualizado no Supabase.');
         } else {
@@ -735,8 +805,8 @@ export async function POST(req: Request) {
             input_description: 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription,
             framework: 'playwright',
             model_used: model,
-            result_raw: JSON.stringify(resultJsonData),
-            result_json: resultJsonData,
+            result_raw: JSON.stringify(resultJsonDataForDb),
+            result_json: resultJsonDataForDb,
           });
           await logToStream('[SmartRun] Historico salvo no Supabase.');
         }

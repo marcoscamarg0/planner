@@ -28,6 +28,16 @@ import {
   FileDown,
   Zap,
   List,
+  ClipboardList,
+  Bug,
+  Table2,
+  Flame,
+  Gauge,
+  Lock,
+  RotateCcw,
+  Scale,
+  Users,
+  LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
@@ -78,6 +88,16 @@ const TYPE_LABEL: Record<string, string> = {
   test_report: "Relatório",
   smart_runner: "Runner Inteligente",
   consolidated_report: "Relatório Executivo",
+  general_test_report: "Rel. Geral",
+  ter: "Execução (TER)",
+  bug_report: "Bugs/Erros",
+  rtm: "Matriz RTM",
+  smoke_test: "Fumaça",
+  performance_report: "Desempenho",
+  security_report: "Segurança",
+  regression_report: "Regressão",
+  compliance_report: "Conformidade",
+  uat_report: "UAT",
 };
 
 const TYPE_COLOR: Record<string, string> = {
@@ -85,6 +105,16 @@ const TYPE_COLOR: Record<string, string> = {
   test_report: "text-violet-400 bg-violet-400/10",
   smart_runner: "text-emerald-400 bg-emerald-400/10",
   consolidated_report: "text-amber-400 bg-amber-400/10",
+  general_test_report: "text-blue-400 bg-blue-400/10",
+  ter: "text-cyan-400 bg-cyan-400/10",
+  bug_report: "text-rose-400 bg-rose-400/10",
+  rtm: "text-indigo-400 bg-indigo-400/10",
+  smoke_test: "text-orange-400 bg-orange-400/10",
+  performance_report: "text-yellow-400 bg-yellow-400/10",
+  security_report: "text-red-400 bg-red-400/10",
+  regression_report: "text-purple-400 bg-purple-400/10",
+  compliance_report: "text-teal-400 bg-teal-400/10",
+  uat_report: "text-pink-400 bg-pink-400/10",
 };
 
 interface Project { id: string; title: string; }
@@ -99,13 +129,109 @@ interface QaReport {
   result_json: any; created_at: string;
 }
 
-type ToolTab = "test_cases" | "test_report" | "smart_runner" | "batch_runner";
+type ReportSubType =
+  | "general_test_report" | "ter" | "bug_report" | "rtm"
+  | "smoke_test" | "performance_report" | "security_report"
+  | "regression_report" | "compliance_report" | "uat_report";
+
+type ToolTab = "test_cases" | "reports" | "smart_runner" | "batch_runner";
+
+const REPORT_TYPES: Array<{
+  key: ReportSubType;
+  label: string;
+  icon: React.ElementType;
+  desc: string;
+  color: string;
+  placeholder: string;
+}> = [
+  {
+    key: "general_test_report",
+    label: "Relatório Geral",
+    icon: LayoutGrid,
+    color: "text-blue-400 border-blue-400/30 bg-blue-400/5",
+    desc: "Visão geral do ciclo: métricas, defeitos abertos, cobertura e critérios de saída.",
+    placeholder: "Descreva o ciclo de testes realizado...\n\nExemplo: Sprint 12 — testamos os módulos de login, cadastro e checkout. Foram executados 80 casos de teste, com 68 aprovados, 9 reprovados e 3 bloqueados. 4 bugs críticos abertos.",
+  },
+  {
+    key: "ter",
+    label: "Execução (TER)",
+    icon: ClipboardList,
+    color: "text-cyan-400 border-cyan-400/30 bg-cyan-400/5",
+    desc: "Detalhamento por caso: ID, passos executados, status e observações do testador.",
+    placeholder: "Descreva os testes executados com detalhes de cada caso...\n\nExemplo: TC001 - Login com e-mail válido → Aprovado. TC002 - Login com senha errada → Reprovado (mensagem de erro não exibida). TC003 - Recuperar senha → Bloqueado (serviço de e-mail fora do ar).",
+  },
+  {
+    key: "bug_report",
+    label: "Bugs / Erros",
+    icon: Bug,
+    color: "text-rose-400 border-rose-400/30 bg-rose-400/5",
+    desc: "Defeitos com ID, severidade, prioridade, passos de reprodução e status.",
+    placeholder: "Descreva os bugs encontrados...\n\nExemplo: BUG-001 - Tela branca ao fazer login com e-mail inválido. Severidade: Alta. Passos: 1. Acessar login. 2. Digitar e-mail inválido. 3. Clicar em Entrar. Resultado: tela branca sem mensagem de erro.",
+  },
+  {
+    key: "rtm",
+    label: "Matriz RTM",
+    icon: Table2,
+    color: "text-indigo-400 border-indigo-400/30 bg-indigo-400/5",
+    desc: "Tabela mapeando requisitos → casos de teste para garantir cobertura total.",
+    placeholder: "Liste os requisitos e seus casos de teste relacionados...\n\nExemplo: REQ-001 O sistema deve permitir login com e-mail e senha → TC001, TC002, TC003. REQ-002 O usuário pode recuperar a senha por e-mail → TC004, TC005. REQ-003 Após 5 tentativas, a conta é bloqueada → TC006.",
+  },
+  {
+    key: "smoke_test",
+    label: "Teste de Fumaça",
+    icon: Flame,
+    color: "text-orange-400 border-orange-400/30 bg-orange-400/5",
+    desc: "Verifica funcionalidades críticas após novo deploy ou build.",
+    placeholder: "Descreva a build e as funcionalidades críticas a verificar...\n\nExemplo: Build v2.3.1 implantada em staging. Verificar: login, logout, criação de conta, checkout, painel administrativo e API de pagamento.",
+  },
+  {
+    key: "performance_report",
+    label: "Desempenho",
+    icon: Gauge,
+    color: "text-yellow-400 border-yellow-400/30 bg-yellow-400/5",
+    desc: "Tempo de resposta, throughput, utilização, escalabilidade e gargalos.",
+    placeholder: "Descreva os resultados dos testes de desempenho...\n\nExemplo: Teste de carga com 500 usuários simultâneos. Tempo de resposta médio: 1.2s (P95: 3.8s). Throughput: 420 req/s. CPU pico: 78%. Endpoint /api/checkout com latência elevada de 4.5s.",
+  },
+  {
+    key: "security_report",
+    label: "Segurança",
+    icon: Lock,
+    color: "text-red-400 border-red-400/30 bg-red-400/5",
+    desc: "Vulnerabilidades (OWASP), CVSS score, impacto e recomendações de mitigação.",
+    placeholder: "Descreva as vulnerabilidades e testes de segurança realizados...\n\nExemplo: Encontrada vulnerabilidade de XSS no campo de busca (CVSS 7.2 - Alto). SQL Injection testado e não encontrado. Autenticação sem rate limiting permite brute force.",
+  },
+  {
+    key: "regression_report",
+    label: "Regressão",
+    icon: RotateCcw,
+    color: "text-purple-400 border-purple-400/30 bg-purple-400/5",
+    desc: "Impacto de novos recursos na estabilidade do sistema existente.",
+    placeholder: "Descreva a mudança realizada e os resultados dos testes de regressão...\n\nExemplo: Nova feature de cupom de desconto adicionada na v2.4. Suíte de regressão: 120 casos. 115 aprovados, 5 reprovados — 3 regressões no módulo de carrinho e 2 no checkout.",
+  },
+  {
+    key: "compliance_report",
+    label: "Conformidade",
+    icon: Scale,
+    color: "text-teal-400 border-teal-400/30 bg-teal-400/5",
+    desc: "Aderência a normas regulatórias (LGPD, ISO 27001, PCI-DSS, HIPAA, etc.).",
+    placeholder: "Descreva o sistema e as normas a verificar...\n\nExemplo: Sistema de pagamentos. Normas: PCI-DSS e LGPD. Verificar: criptografia de dados de cartão, consentimento de coleta de dados pessoais, política de retenção e logs de auditoria.",
+  },
+  {
+    key: "uat_report",
+    label: "UAT",
+    icon: Users,
+    color: "text-pink-400 border-pink-400/30 bg-pink-400/5",
+    desc: "Resultado dos testes com usuários finais e prontidão para produção.",
+    placeholder: "Descreva os cenários testados pelos usuários e seus feedbacks...\n\nExemplo: 8 usuários finais testaram o novo fluxo de onboarding por 3 dias. Principais feedbacks: botão de 'próximo' pouco visível, texto das instruções confuso, dificuldade em entender o formulário de endereço.",
+  },
+];
 
 
 interface QaClientProps { projects: Project[]; }
 
 export function QaClient({ projects }: QaClientProps) {
   const [activeTab, setActiveTab] = useState<ToolTab>("smart_runner");
+  const [selectedReportType, setSelectedReportType] = useState<ReportSubType | null>(null);
   const [selectedModel, setSelectedModel] = useState("auto-free");
   const [selectedFramework, setSelectedFramework] = useState("playwright");
   const [input, setInput] = useState("");
@@ -167,8 +293,8 @@ export function QaClient({ projects }: QaClientProps) {
     });
   };
 
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handlePdfUpload = async (input: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = 'target' in input ? input.target.files?.[0] : input;
     if (!file) return;
     setPdfFile(file);
     setParsingPdf(true);
@@ -232,6 +358,21 @@ export function QaClient({ projects }: QaClientProps) {
       setError("Erro ao ler PDF: " + (err.message || err));
       setPdfFile(null);
     } finally {
+      setParsingPdf(false);
+    }
+  };
+
+  const importPdfFromUrl = async (url: string) => {
+    try {
+      setParsingPdf(true);
+      setActiveTab("reports");
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const file = new File([blob], "smart_runner_report.pdf", { type: "application/pdf" });
+      await handlePdfUpload(file);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao importar PDF do Runner");
       setParsingPdf(false);
     }
   };
@@ -545,7 +686,7 @@ export function QaClient({ projects }: QaClientProps) {
     { key: "smart_runner" as ToolTab, label: "🤖 Runner IA",  icon: Zap,        desc: "URL + descrição → IA gera o script → executa → PDF" },
     { key: "batch_runner" as ToolTab, label: "Lote / Fila", icon: List, desc: "Execute múltiplos testes em background" },
     { key: "test_cases" as ToolTab,  label: "Casos de Teste",icon: FlaskConical,desc: "Gere suítes de teste a partir de um requisito ou funcionalidade" },
-    { key: "test_report" as ToolTab, label: "Relatório",    icon: FileText,   desc: "Documente resultados em um relatório profissional" },
+    { key: "reports" as ToolTab,     label: "📋 Relatórios", icon: FileText,   desc: "Gere 10 tipos de relatórios de QA profissionais" },
   ];
 
 
@@ -937,7 +1078,7 @@ export function QaClient({ projects }: QaClientProps) {
 
   const PLACEHOLDERS: Record<ToolTab, string> = {
     test_cases: "Descreva a funcionalidade a ser testada...\n\nExemplo: Tela de login com e-mail e senha. O usuário pode recuperar a senha. Após 5 tentativas erradas, a conta é bloqueada por 10 minutos.",
-    test_report: "Descreva o que foi testado e os resultados encontrados...\n\nExemplo: Testamos o fluxo de login. 2 bugs críticos encontrados: tela branca ao tentar login com e-mail inválido e botão de recuperação sem feedback visual.",
+    reports: "Selecione um tipo de relatório acima e descreva os dados...",
     smart_runner: "Cole uma URL para executar testes automatizados e gerar relatórios completos em background...",
     batch_runner: "Adicione as URLs e especificações para a execução de testes em lote e geração de relatórios...",
   };
@@ -1048,7 +1189,7 @@ export function QaClient({ projects }: QaClientProps) {
             return (
               <button
                 key={t.key}
-                onClick={() => { setActiveTab(t.key); setResult(null); setTestCases(null); setError(null); setHtmlFile(null); }}
+                onClick={() => { setActiveTab(t.key); setResult(null); setTestCases(null); setError(null); setHtmlFile(null); if (t.key !== "reports") setSelectedReportType(null); }}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all",
                   activeTab === t.key
@@ -1306,10 +1447,171 @@ export function QaClient({ projects }: QaClientProps) {
 
         {/* Tab Content */}
         {activeTab === "smart_runner" ? (
-          <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} />
+          <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} onImportPdf={importPdfFromUrl} />
         ) : activeTab === "batch_runner" ? (
           <div className="max-w-5xl mx-auto px-6 pb-6">
             <BatchRunnerTab />
+          </div>
+        ) : activeTab === "reports" ? (
+          <div className="max-w-5xl mx-auto px-6 pb-6 space-y-6">
+            {/* Report Type Selector Grid */}
+            {!selectedReportType ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-4 pt-4"
+              >
+                <div>
+                  <h2 className="text-base font-semibold text-foreground">Escolha o tipo de relatório</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Selecione um dos 10 tipos de relatório de QA para gerar com IA</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {REPORT_TYPES.map((rt) => {
+                    const RtIcon = rt.icon;
+                    return (
+                      <motion.button
+                        key={rt.key}
+                        onClick={() => { setSelectedReportType(rt.key); setInput(""); setResult(null); setError(null); }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        className={cn(
+                          "flex items-start gap-3 p-4 rounded-xl border text-left transition-all hover:shadow-md group",
+                          rt.color
+                        )}
+                      >
+                        <div className="shrink-0 w-9 h-9 rounded-lg bg-card/60 border border-border/50 flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <RtIcon className="w-4.5 h-4.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground">{rt.label}</p>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">{rt.desc}</p>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key={selectedReportType}
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="space-y-6 pt-4"
+              >
+                {/* Back + title */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => { setSelectedReportType(null); setInput(""); setResult(null); setError(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+                  >
+                    <ChevronRight className="w-3 h-3 rotate-180" />
+                    Voltar
+                  </button>
+                  {(() => {
+                    const rt = REPORT_TYPES.find(r => r.key === selectedReportType)!;
+                    const RtIcon = rt.icon;
+                    return (
+                      <div className="flex items-center gap-2">
+                        <RtIcon className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-semibold text-foreground">{rt.label}</span>
+                        <span className="text-[10px] text-muted-foreground">{rt.desc}</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Input Area for selected report type */}
+                <div className="glass rounded-2xl border border-border p-5 space-y-4">
+                  <p className="text-xs text-muted-foreground">
+                    {REPORT_TYPES.find(r => r.key === selectedReportType)?.desc}
+                  </p>
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={REPORT_TYPES.find(r => r.key === selectedReportType)?.placeholder || "Descreva os dados para o relatório..."}
+                    rows={7}
+                    className="w-full bg-black/10 dark:bg-black/30 text-foreground placeholder:text-muted-foreground/60 rounded-xl p-4 text-sm outline-none border border-border/50 resize-y focus:border-primary/50 transition-colors leading-relaxed"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={async () => {
+                        if (!input.trim()) return;
+                        setLoading(true);
+                        setResult(null);
+                        setError(null);
+                        try {
+                          const res = await fetch("/api/ai/qa", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              tool_type: selectedReportType,
+                              input: input.trim(),
+                              model: selectedModel,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.error || "Falha na geração");
+                          if (data.report) setSelectedReport(data.report);
+                          setResult(data.result);
+                          loadReports();
+                        } catch (e: any) {
+                          setError(e.message || "Ocorreu um erro inesperado.");
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={loading || !input.trim()}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all disabled:opacity-50 shadow-lg shadow-primary/25"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      {loading ? "Gerando..." : "Gerar com IA"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Error */}
+                {error && (
+                  <div className="flex items-start gap-2.5 p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-sm text-destructive">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    {error}
+                  </div>
+                )}
+
+                {/* Result */}
+                {result && !loading && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span className="text-sm font-semibold text-foreground">Relatório gerado com sucesso!</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => downloadResult(result, "md", TYPE_LABEL[selectedReportType!]?.replace(/\s/g, "_") || "relatorio")}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all"
+                        >
+                          <Download className="w-3.5 h-3.5" /> .MD
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(result)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all"
+                        >
+                          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          Copiar
+                        </button>
+                      </div>
+                    </div>
+                    <pre className="text-xs text-foreground leading-relaxed font-mono bg-black/20 rounded-xl p-5 overflow-y-auto whitespace-pre-wrap border border-border/50" style={{ maxHeight: "60vh" }}>
+                      {result}
+                    </pre>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
           </div>
         ) : (
           <div className="max-w-5xl mx-auto px-6 pb-6 space-y-6">
@@ -1336,35 +1638,6 @@ export function QaClient({ projects }: QaClientProps) {
                   </button>
                 )}
 
-                {activeTab === "test_report" && (
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={pdfInputRef}
-                      type="file"
-                      accept=".pdf"
-                      className="hidden"
-                      onChange={handlePdfUpload}
-                    />
-                    <button
-                      onClick={() => pdfInputRef.current?.click()}
-                      disabled={parsingPdf}
-                      className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer",
-                        pdfFile ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "border-border text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {parsingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                      {pdfFile ? `📄 ${pdfFile.name}` : "Carregar PDF de Relatório"}
-                    </button>
-                    {pdfFile && (
-                      <button
-                        onClick={() => { setPdfFile(null); setInput(""); }}
-                        className="text-xs text-muted-foreground hover:text-destructive transition-colors p-1"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
 
               {parsingPdf ? (
@@ -1534,22 +1807,15 @@ export function QaClient({ projects }: QaClientProps) {
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {activeTab === "test_report" ? (
-                      <FileText className="w-4 h-4 text-primary" />
-                    ) : (
-                      <Code2 className="w-4 h-4 text-primary" />
-                    )}
-                    <h2 className="text-sm font-semibold text-foreground">
-                      {activeTab === "test_report" ? "Relatório Gerado" : "Script de Automação"}
-                    </h2>
+                    <Code2 className="w-4 h-4 text-primary" />
+                    <h2 className="text-sm font-semibold text-foreground">Script Gerado</h2>
                     <span className="text-xs text-emerald-400 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> Salvo automaticamente
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => downloadResult(result, activeTab === "test_report" ? "md" : selectedFramework === "selenium" ? "py" : "ts",
-                        activeTab === "test_report" ? "relatorio-teste" : "script-automacao")}
+                      onClick={() => downloadResult(result, selectedFramework === "selenium" ? "py" : "ts", "script-automacao")}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
                     >
                       <Download className="w-3.5 h-3.5" />
@@ -1565,13 +1831,9 @@ export function QaClient({ projects }: QaClientProps) {
                   </div>
                 </div>
                 <div className="glass rounded-xl border border-border overflow-hidden p-5">
-                  {activeTab === "test_report" ? (
-                    <ReportDashboard reportText={result} title="Relatório de Teste Melhorado" date={new Date().toISOString()} pdfImagesToRender={pdfImages} />
-                  ) : (
-                    <pre className="text-xs leading-relaxed text-foreground overflow-x-auto whitespace-pre-wrap font-mono">
-                      {result}
-                    </pre>
-                  )}
+                  <pre className="text-xs leading-relaxed text-foreground overflow-x-auto whitespace-pre-wrap font-mono">
+                    {result}
+                  </pre>
                 </div>
               </motion.div>
             )}
