@@ -12,10 +12,11 @@ import { useRouter } from "next/navigation";
 
 interface ProjectCardProps {
   project: ProjectWithStats;
+  subProjects?: ProjectWithStats[];
   index?: number;
 }
 
-export function ProjectCard({ project, index = 0 }: ProjectCardProps) {
+export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCardProps) {
   const progressRate =
     project.total_tasks > 0
       ? Math.round((project.completed_tasks / project.total_tasks) * 100)
@@ -210,6 +211,33 @@ export function ProjectCard({ project, index = 0 }: ProjectCardProps) {
           />
         )}
       </Link>
+
+      {subProjects.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-border space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+            Subprojetos ({subProjects.length})
+          </p>
+          <div className="flex flex-col gap-2">
+            {subProjects.map(sp => (
+              <Link 
+                key={sp.id} 
+                href={`/projects/${sp.id}`}
+                className="flex items-center gap-2 p-2 rounded-lg hover:bg-accent/50 transition-colors border border-transparent hover:border-border"
+              >
+                <div 
+                  className="w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0"
+                  style={{ backgroundColor: `${sp.color}20` }}
+                >
+                  {sp.emoji ?? "📁"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-medium text-foreground truncate">{sp.title}</h4>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </motion.article>
   );
 }

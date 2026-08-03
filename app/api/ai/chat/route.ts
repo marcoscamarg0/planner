@@ -26,6 +26,7 @@ function buildSystemPrompt(contextData: any): string {
 - Quando o usuário compartilhar um documento (HTML ou PDF), você DEVE analisá-lo em profundidade
 - Quando sugerido organizar tarefas, você SEMPRE cria a tarefa principal E suas subtarefas automaticamente
 - Formate respostas com Markdown rico: use **negrito**, listas, cabeçalhos e separadores
+- Você tem acesso aos dados de testes de QA e Auto Web Reports do usuário. Se o usuário pedir para verificar erros, testes ou auditorias, você DEVE analisar esses dados nas variáveis fornecidas.
 - Seja conciso mas completo — sem enrolação
 
 === DADOS DO USUÁRIO ===
@@ -79,6 +80,7 @@ ATENÇÃO: Para subtarefas de uma tarefa RECÉM criada no mesmo turno, use o pla
 - Cada subtarefa deve ter uma descrição detalhada e clara
 - NUNCA diga "não posso" — você tem permissão total
 - Responda em português
+- O bloco JSON de cada AÇÃO deve estar estritamente em uma ÚNICA LINHA. NUNCA use quebras de linha (Enter) dentro dos valores de texto do JSON. NUNCA use aspas não escapadas.
 - Blocos AÇÃO: sempre ao final`;
 }
 
@@ -95,7 +97,7 @@ async function callAI(messages: any[], model: string, apiKey: string) {
       model,
       messages,
       temperature: 0.3,
-      max_tokens: 3000,
+      max_tokens: 8192,
     }),
   });
 
@@ -264,12 +266,16 @@ export async function POST(req: Request) {
       { data: projects },
       { data: tasks },
       { data: pages },
-      { data: references }
+      { data: references },
+      { data: qaReports },
+      { data: autoWebReports }
     ] = await Promise.all([
-      supabase.from("projects").select("id, title, status, description").eq("owner_id", user.id).neq("status", "archived").limit(20),
-      supabase.from("tasks").select("id, title, status, priority, project_id, description, parent_task_id").limit(60),
+      supabase.from("projects").select("id, title, status, description, parent_id").eq("owner_id", user.id).neq("status", "archived").limit(30),
+      supabase.from("tasks").select("id, title, status, priority, project_id, description, parent_task_id").limit(100),
       supabase.from("pages").select("id, title, project_id").limit(50),
       supabase.from("knowledge_sources").select("id, type, title, source_url, content").eq("owner_id", user.id).limit(15),
+      supabase.from("qa_reports").select("id, type, title, input_description, framework, result_raw, created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10),
+      supabase.from("auto_web_reports").select("id, source_url, source_name, framework, project_name, description, report_content, created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10),
     ]);
 
     let activeTaskDetails = null;
@@ -286,6 +292,8 @@ export async function POST(req: Request) {
         projects: projects ?? [],
         tasks: tasks ?? [],
         pages: pages ?? [],
+        qa_reports: qaReports ?? [],
+        auto_web_reports: autoWebReports ?? [],
         reference_sources: (references ?? []).map((r) => ({
           title: r.title,
           type: r.type,
@@ -315,16 +323,22 @@ export async function POST(req: Request) {
 
     while ((match = actionRegex.exec(aiResponse)) !== null) {
       try {
-        const { action, params } = JSON.parse(match[1]);
+        // Replace literal newlines with space to avoid JSON parse errors
+        const cleanedJson = match[1].replace(/\n/g, " ").replace(/\r/g, "");
+        const { action, params } = JSON.parse(cleanedJson);
         const { result, newTaskId } = await executeAction(action, params, supabase, lastTaskId);
         actionResults.push(result);
         if (newTaskId) lastTaskId = newTaskId;
-      } catch (e) {
-        actionResults.push("⚠️ Não foi possível processar a ação.");
+      } catch (e: any) {
+        console.error("Action parse error:", e);
+        actionResults.push("⚠️ Não foi possível processar uma ação devido a um erro de formatação do assistente.");
       }
     }
 
-    cleanResponse = aiResponse.replace(/AÇÃO:\s*\{[\s\S]*?\}/g, "").trim();
+    cleanResponse = aiResponse.replace(/AÇÃO:\s*\{[\s\S]*?\}/g, "");
+    
+    // Remove any truncated trailing ACTION blocks to prevent UI leakage
+    cleanResponse = cleanResponse.replace(/AÇÃO:\s*\{[\s\S]*$/, "").trim();
 
     const finalReply = actionResults.length > 0
       ? actionResults.join("\n") + (cleanResponse ? "\n\n" + cleanResponse : "")

@@ -185,6 +185,7 @@ interface StepResult {
   status: 'aprovado' | 'falha_clique' | 'erro_js' | 'pulado';
   detalhe: string;
   screenshotBase64?: string;
+  screenshotElementBase64?: string;
   duration?: number;
 }
 
@@ -222,6 +223,7 @@ async function autoAcceptCookies(page: any) {
 async function runStep(page: any, step: SmartStep, index: number, baseUrl: string): Promise<StepResult> {
   const start = Date.now();
   let screenshotBase64: string | undefined;
+  let screenshotElementBase64: string | undefined;
 
   // `page` is always the ORIGINAL page (first tab). We use it as the anchor.
   const getActivePage = () => {
@@ -287,39 +289,31 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
         let externalPage: any;
         try {
           externalPage = await page.context().newPage();
-          await externalPage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-          await externalPage.waitForTimeout(1500);
-          screenshotBase64 = await takeScreenshot(externalPage);
-        } catch { /* ignore */ } finally {
-          if (externalPage) await externalPage.close().catch(() => {});
-        }
-        await page.bringToFront().catch(() => {});
-        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + dest, screenshotBase64, duration: Date.now() - start };
+          await externalPage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          await externalPage.close();
+        } catch { }
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + dest, duration: Date.now() - start };
       }
 
-      // Same-domain goto: navigate normally on the original page
-      await activePage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await activePage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
       await autoAcceptCookies(activePage);
-      await activePage.waitForTimeout(1000);
-      screenshotBase64 = await takeScreenshot(activePage);
-      return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + dest, screenshotBase64, duration: Date.now() - start };
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + dest, duration: Date.now() - start };
     }
 
-    if (step.action === 'wait' || step.action === 'newPage') {
-      const ms = step.milliseconds || 1500;
+    if (lower.includes('aguardar') || lower.includes('wait')) {
+      const ms = step.milliseconds || 2000;
       await activePage.waitForTimeout(ms);
-      screenshotBase64 = await takeScreenshot(activePage);
-      return { index, label: step.label, status: 'aprovado', detalhe: 'Aguardou ' + ms + 'ms', screenshotBase64, duration: Date.now() - start };
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Aguardou ' + ms + 'ms', duration: Date.now() - start };
     }
 
     if (step.action === 'scroll') {
-      await activePage.evaluate(() => window.scrollBy(0, window.innerHeight * 0.7));
-      await activePage.waitForTimeout(800);
-      screenshotBase64 = await takeScreenshot(activePage);
-      return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', screenshotBase64, duration: Date.now() - start };
+      if (lower.includes('rolar') || lower.includes('scroll')) {
+        await activePage.mouse.wheel(0, 800);
+        await activePage.waitForTimeout(1000);
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', duration: Date.now() - start };
+      }
     }
 
-    // Action Customizada: closePopups
     if (step.action as any === 'closePopups') {
       const pages = page.context().pages();
       let closed = 0;
@@ -430,9 +424,10 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
 
     await activePage.waitForTimeout(400);
 
-    // Tira print apenas do botão/elemento ANTES do clique (enquanto está com destaque vermelho)
-    if (!screenshotBase64) {
-      screenshotBase64 = await takeScreenshot(undefined, locator).catch(() => undefined);
+    // Evidência pequena do elemento ANTES da ação e após o highlight
+    if (step.action !== 'type' && step.action !== 'hover') {
+      const buf = await locator.screenshot({ type: 'jpeg', quality: 80, timeout: 5000 }).catch(() => null);
+      if (buf) screenshotElementBase64 = buf.toString('base64');
     }
 
     if (originalStyle) {
@@ -485,6 +480,11 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
         await closeExtraTabs();
       }
 
+      // Take screenshot of the new state before potentially navigating back
+      if (!screenshotBase64) {
+        screenshotBase64 = await takeScreenshot(targetPage);
+      }
+
       // If the click navigated the original page to an external domain, go back
       try {
         const currentHost = new URL(page.url()).hostname;
@@ -498,8 +498,10 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       } catch { /* ignore */ }
     }
 
-    if (!screenshotBase64) {
-      screenshotBase64 = await takeScreenshot(targetPage);
+    if (step.action !== 'type' && step.action !== 'hover') {
+      if (!screenshotBase64) {
+        screenshotBase64 = await takeScreenshot(targetPage);
+      }
     }
 
     const currentUrl = page.url();
@@ -513,7 +515,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       detalhe += ` ➡️ Página atual: ${currentUrl}`;
     }
 
-    return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, duration: Date.now() - start };
+    return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, screenshotElementBase64, duration: Date.now() - start };
 
   } catch (err: unknown) {
     // Check if the page URL changed — if so, the action actually worked
@@ -533,7 +535,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
         label: step.label,
         status: 'aprovado',
         detalhe: `Clique executado (com aviso de timeout). ➡️ Página atual: ${urlAfterError}`,
-        screenshotBase64,
+        screenshotBase64, screenshotElementBase64,
         duration: Date.now() - start,
       };
     }
@@ -551,7 +553,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
           label: step.label,
           status: 'aprovado',
           detalhe: `Clique abriu nova aba: ${popupUrl}`,
-          screenshotBase64,
+          screenshotBase64, screenshotElementBase64,
           duration: Date.now() - start,
         };
       }
@@ -570,7 +572,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     } catch { /* ignore */ }
     const msg = err instanceof Error ? err.message.split('\n')[0].substring(0, 200) : String(err);
     // Forçando aprovação conforme solicitado para evitar qualquer marcação de falha no relatório
-    return { index, label: step.label, status: 'aprovado', detalhe: 'Ação executada (Aviso: ' + msg + ')', screenshotBase64, duration: Date.now() - start };
+    return { index, label: step.label, status: 'aprovado', detalhe: 'Ação executada (Aviso: ' + msg + ')', screenshotBase64, screenshotElementBase64, duration: Date.now() - start };
   }
 }
 
@@ -779,6 +781,7 @@ export async function POST(req: Request) {
         axeViolationsCount: axeViolations.length,
         steps: stepResults,
         generatedStepsCode: steps.map(s => s.label),
+        rawSteps: steps,
         pdfUrl,
         htmlReportUrl,
         finalScreenshot,

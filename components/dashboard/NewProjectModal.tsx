@@ -18,15 +18,17 @@ interface NewProjectModalProps {
   open: boolean;
   onClose: () => void;
   onCreated: (project: Project) => void;
+  projects?: Project[];
 }
 
-export function NewProjectModal({ open, onClose, onCreated }: NewProjectModalProps) {
+export function NewProjectModal({ open, onClose, onCreated, projects = [] }: NewProjectModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [emoji, setEmoji] = useState("📁");
   const [color, setColor] = useState(COLORS[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [parentId, setParentId] = useState<string>("none");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +55,7 @@ export function NewProjectModal({ open, onClose, onCreated }: NewProjectModalPro
         emoji,
         color,
         status: "active",
+        parent_id: parentId !== "none" ? parentId : null,
       })
       .select()
       .single();
@@ -68,6 +71,7 @@ export function NewProjectModal({ open, onClose, onCreated }: NewProjectModalPro
     setDescription("");
     setEmoji("📁");
     setColor(COLORS[0]);
+    setParentId("none");
     onCreated(data as Project);
   };
 
@@ -75,6 +79,7 @@ export function NewProjectModal({ open, onClose, onCreated }: NewProjectModalPro
     if (!loading) {
       setTitle("");
       setDescription("");
+      setParentId("none");
       setError(null);
       onClose();
     }
@@ -215,6 +220,36 @@ export function NewProjectModal({ open, onClose, onCreated }: NewProjectModalPro
                     )}
                   />
                 </div>
+
+                {projects.length > 0 && (
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="project-parent"
+                      className="text-sm font-medium text-foreground"
+                    >
+                      Projeto Pai{" "}
+                      <span className="text-muted-foreground text-xs">(opcional)</span>
+                    </label>
+                    <select
+                      id="project-parent"
+                      value={parentId}
+                      onChange={(e) => setParentId(e.target.value)}
+                      className={cn(
+                        "w-full px-4 py-3 rounded-xl bg-muted border border-border",
+                        "text-foreground",
+                        "focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50",
+                        "transition-all duration-200 text-sm appearance-none"
+                      )}
+                    >
+                      <option value="none">-- Nenhum --</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {error && (
                   <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg" role="alert">

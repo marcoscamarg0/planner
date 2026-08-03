@@ -243,8 +243,11 @@ export function buildReportHtml(opts: ReportOptions): string {
     const resultadoEsperado = buildResultadoEsperado(r);
     const evidenciaFuncional = buildEvidenciaFuncional(r, r.index);
 
-    const imagemHtml = r.screenshotBase64
-      ? `<img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Evidência Passo #${r.index}">`
+    const imagemHtml = (r.screenshotBase64 || r.screenshotElementBase64)
+      ? `<div style="position: relative; display: inline-block; width: 100%;">
+          ${r.screenshotBase64 ? `<img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Evidência Passo #${r.index}">` : `<div style="padding: 40px; background: #f8fafc; text-align: center; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 8px; font-size: 13px;">Ação sem mudança de tela inteira capturada.</div>`}
+          ${r.screenshotElementBase64 ? `<img src="data:image/jpeg;base64,${r.screenshotElementBase64}" alt="Elemento Interagido" style="position: absolute; bottom: 16px; right: 16px; max-width: 300px; max-height: 200px; border: 2px solid #ef4444; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); background: white; z-index: 10;">` : ''}
+         </div>`
       : `<div class="sem-evidencia">⚠ Sem captura de tela disponível para este passo.</div>`;
 
     return `

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe, Upload, X, Sparkles, Loader2, Download, Copy, Check,
   FileCode, FileText, Package, AlertCircle, CheckCircle2,
   ChevronDown, Code2, History, RefreshCw, ChevronRight, Link,
-  Zap, Terminal, Play, Plus, Printer, ShieldAlert, CheckSquare, Eye, FileJson, AlertTriangle, FileDown
+  Zap, Terminal, Play, Plus, Printer, ShieldAlert, CheckSquare, Eye, FileJson, AlertTriangle, FileDown,
+  Search, ArrowUpDown, SlidersHorizontal
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -202,6 +203,18 @@ export function AutoWebTab() {
   const [loadingReports, setLoadingReports] = useState(false);
   const [selectedReport, setSelectedReport] = useState<AutoWebReport | null>(null);
   const [expandedUrlGroup, setExpandedUrlGroup] = useState<string | null>(null);
+
+  // History Filters (top-level: date)
+  const [historyDateFilter, setHistoryDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [historySort, setHistorySort] = useState<"newest" | "oldest">("newest");
+
+  // Site sidebar filters
+  const [siteSearch, setSiteSearch] = useState("");
+
+  // Per-site report filters
+  const [reportFrameworkFilter, setReportFrameworkFilter] = useState<string>("all");
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportSort, setReportSort] = useState<"newest" | "oldest">("newest");
 
   // Manual Creation Modal states
   const [showManualModal, setShowManualModal] = useState(false);
@@ -520,25 +533,97 @@ export function AutoWebTab() {
     setTimeout(() => download(result.report, "RELATORIO.md"), 600);
   };
 
-  // Group reports by URL Host
-  const getGroupedReports = () => {
+  // 1. Apply top-level date filter and sort to all reports
+  const filteredByDate = useMemo(() => {
+    let f = [...reports];
+    if (historyDateFilter !== "all") {
+      const cutoff = new Date();
+      if (historyDateFilter === "today") cutoff.setHours(0, 0, 0, 0);
+      else if (historyDateFilter === "7d") cutoff.setDate(cutoff.getDate() - 7);
+      else if (historyDateFilter === "30d") cutoff.setDate(cutoff.getDate() - 30);
+      f = f.filter(r => new Date(r.created_at) >= cutoff);
+    }
+    f.sort((a, b) => {
+      const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return historySort === "newest" ? diff : -diff;
+    });
+    return f;
+  }, [reports, historyDateFilter, historySort]);
+
+  // 2. Group all filtered reports by hostname (for the sidebar)
+  const allSites = useMemo(() => {
     const groups: Record<string, AutoWebReport[]> = {};
-    reports.forEach(r => {
-      let key = "Sem URL / Local";
+    filteredByDate.forEach(r => {
+      let key = "Local / Sem URL";
       if (r.source_url) {
-        try {
-          key = new URL(r.source_url).hostname;
-        } catch {
-          key = r.source_url;
-        }
+        try { key = new URL(r.source_url).hostname; } catch { key = r.source_url; }
       }
       if (!groups[key]) groups[key] = [];
       groups[key].push(r);
     });
     return groups;
-  };
+  }, [filteredByDate]);
 
-  const grouped = getGroupedReports();
+  // 3. Filter sidebar sites by siteSearch
+  const visibleSites = useMemo(() => {
+    if (!siteSearch.trim()) return allSites;
+    const q = siteSearch.toLowerCase();
+    const result: Record<string, AutoWebReport[]> = {};
+    Object.entries(allSites).forEach(([domain, reps]) => {
+      if (domain.toLowerCase().includes(q) ||
+          reps.some(r => (r.source_url || "").toLowerCase().includes(q))) {
+        result[domain] = reps;
+      }
+    });
+    return result;
+  }, [allSites, siteSearch]);
+
+  // 4. Get the reports for the currently selected site, filtered by framework + name search + sort
+  const reportsForSite = useMemo(() => {
+    if (!expandedUrlGroup || !allSites[expandedUrlGroup]) return [];
+    let reps = [...allSites[expandedUrlGroup]];
+    if (reportFrameworkFilter !== "all") {
+      reps = reps.filter(r => r.framework?.toLowerCase() === reportFrameworkFilter);
+    }
+    if (reportSearch.trim()) {
+      const q = reportSearch.toLowerCase();
+      reps = reps.filter(r =>
+        (r.source_name || "").toLowerCase().includes(q) ||
+        (r.description || "").toLowerCase().includes(q)
+      );
+    }
+    reps.sort((a, b) => {
+      const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return reportSort === "newest" ? diff : -diff;
+    });
+    return reps;
+  }, [allSites, expandedUrlGroup, reportFrameworkFilter, reportSearch, reportSort]);
+
+  // 5. Get available frameworks for the selected site (for filter chips)
+  const frameworksInSite = useMemo(() => {
+    if (!expandedUrlGroup || !allSites[expandedUrlGroup]) return [];
+    const fws = new Set(allSites[expandedUrlGroup].map(r => r.framework).filter(Boolean));
+    return Array.from(fws) as string[];
+  }, [allSites, expandedUrlGroup]);
+
+  // Auto-select first site when history loads
+  useEffect(() => {
+    const domains = Object.keys(allSites);
+    if (domains.length > 0 && !expandedUrlGroup) {
+      setExpandedUrlGroup(domains[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSites]);
+
+  // Reset per-site filters when switching sites
+  useEffect(() => {
+    setReportFrameworkFilter("all");
+    setReportSearch("");
+    setReportSort("newest");
+  }, [expandedUrlGroup]);
+
+  // For backward compat: expose grouped for legacy code
+  const grouped = visibleSites;
 
   const scriptFilename = framework === "selenium" ? "test_automation.py"
     : framework === "cypress" ? "automation.cy.js"
@@ -923,7 +1008,6 @@ export function AutoWebTab() {
           </div>
         </div>
       </div>
-
       {/* History Panel (Grouped by URL) */}
       <AnimatePresence>
         {showHistory && (
@@ -934,53 +1018,201 @@ export function AutoWebTab() {
             className="overflow-hidden"
           >
             <div className="glass rounded-2xl border border-border overflow-hidden">
-              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+              {/* Panel Header */}
+              <div className="px-5 py-3 border-b border-border flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-semibold">Organização de Relatórios por URL ({Object.keys(grouped).length} Domínios)</span>
+                  <span className="text-sm font-semibold">Histórico por Site</span>
+                  <span className="text-xs text-muted-foreground">({Object.keys(allSites).length} sites · {filteredByDate.length} testes)</span>
                 </div>
-                <button onClick={loadReports} className="text-muted-foreground hover:text-foreground transition-colors">
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Date filter chips */}
+                  {(["all", "today", "7d", "30d"] as const).map(d => {
+                    const labels = { all: "Todos", today: "Hoje", "7d": "7 dias", "30d": "30 dias" };
+                    return (
+                      <button key={d} onClick={() => setHistoryDateFilter(d)}
+                        className={cn("px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all",
+                          historyDateFilter === d ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:text-foreground hover:border-primary/20"
+                        )}
+                      >
+                        {labels[d]}
+                      </button>
+                    );
+                  })}
+                  {/* Global sort */}
+                  <button
+                    onClick={() => setHistorySort(s => s === "newest" ? "oldest" : "newest")}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold border border-border text-muted-foreground hover:text-foreground hover:border-primary/20 transition-all"
+                  >
+                    <ArrowUpDown className="w-3 h-3" />
+                    {historySort === "newest" ? "Mais recente" : "Mais antigo"}
+                  </button>
+                  <button onClick={loadReports} className="text-muted-foreground hover:text-foreground transition-colors p-1">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
+
               {loadingReports ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-2">
                   <Loader2 className="w-5 h-5 animate-spin text-primary" />
                   <span className="text-xs text-muted-foreground">Carregando histórico...</span>
                 </div>
-              ) : historyError && Object.keys(grouped).length === 0 ? (
+              ) : historyError && Object.keys(allSites).length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-2 px-6 text-center">
                   <AlertCircle className="w-6 h-6 text-amber-400 opacity-70" />
                   <p className="text-sm text-muted-foreground">{historyError}</p>
                 </div>
-              ) : Object.keys(grouped).length === 0 ? (
-                <p className="text-center py-6 text-sm text-muted-foreground">Nenhuma URL cadastrada ainda.</p>
+              ) : Object.keys(allSites).length === 0 ? (
+                <p className="text-center py-6 text-sm text-muted-foreground">Nenhum teste salvo ainda. Gere seu primeiro!</p>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border min-h-[250px]">
-                  {/* Left Column: URL List */}
-                  <div className="md:col-span-1 overflow-y-auto max-h-[350px] p-2 space-y-1">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground/60 px-2 block mb-2">URLs Testadas</span>
-                    {Object.keys(grouped).map(domain => (
-                      <button
-                        key={domain}
-                        onClick={() => setExpandedUrlGroup(expandedUrlGroup === domain ? null : domain)}
-                        className={cn("w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left text-sm transition-all", 
-                          expandedUrlGroup === domain ? "bg-primary/10 text-primary font-medium" : "hover:bg-accent/40 text-foreground"
+                <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border" style={{ minHeight: 300 }}>
+
+                  {/* ── Left Sidebar: Site List ────────────────── */}
+                  <div className="md:col-span-1 flex flex-col">
+                    {/* Site search */}
+                    <div className="p-3 border-b border-border">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                        <input
+                          type="text"
+                          value={siteSearch}
+                          onChange={e => setSiteSearch(e.target.value)}
+                          placeholder="Filtrar site..."
+                          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                        />
+                        {siteSearch && (
+                          <button onClick={() => setSiteSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                            <X className="w-3 h-3" />
+                          </button>
                         )}
-                      >
-                        <span className="truncate flex-1 pr-2">{domain}</span>
-                        <span className="text-[10px] bg-black/20 px-2 py-0.5 rounded-full font-bold">{grouped[domain].length}</span>
-                      </button>
-                    ))}
+                      </div>
+                    </div>
+
+                    {/* Site list */}
+                    <div className="overflow-y-auto flex-1 p-2 space-y-1 max-h-[340px]">
+                      {Object.keys(visibleSites).length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">Nenhum site encontrado</p>
+                      ) : Object.entries(visibleSites).map(([domain, domainReports]) => {
+                        const isSelected = expandedUrlGroup === domain;
+                        // Framework breakdown for badge dots
+                        const fwCounts: Record<string, number> = {};
+                        domainReports.forEach(r => { if (r.framework) fwCounts[r.framework] = (fwCounts[r.framework] || 0) + 1; });
+                        const fwColors: Record<string, string> = { playwright: "bg-violet-400", cypress: "bg-emerald-400", selenium: "bg-amber-400", manual: "bg-sky-400" };
+                        return (
+                          <button
+                            key={domain}
+                            onClick={() => setExpandedUrlGroup(isSelected ? null : domain)}
+                            className={cn(
+                              "w-full flex items-start justify-between px-3 py-2.5 rounded-lg text-left transition-all group",
+                              isSelected
+                                ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
+                                : "hover:bg-accent/40 text-foreground border border-transparent"
+                            )}
+                          >
+                            <div className="min-w-0 flex-1 mr-2">
+                              <p className="text-sm font-semibold truncate">{domain}</p>
+                              {/* Framework dots */}
+                              <div className="flex items-center gap-1 mt-1">
+                                {Object.entries(fwCounts).map(([fw, cnt]) => (
+                                  <span key={fw} className="flex items-center gap-0.5">
+                                    <span className={cn("w-1.5 h-1.5 rounded-full", fwColors[fw] || "bg-border")} />
+                                    <span className="text-[9px] text-muted-foreground capitalize">{fw} ({cnt})</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 mt-0.5",
+                              isSelected ? "bg-primary/20 text-primary" : "bg-black/15 text-muted-foreground"
+                            )}>
+                              {domainReports.length}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* Middle Column: Reports for selected URL */}
-                  <div className="md:col-span-2 overflow-y-auto max-h-[350px] p-4 space-y-2">
+                  {/* ── Right Column: Tests for Selected Site ─── */}
+                  <div className="md:col-span-2 flex flex-col">
                     {expandedUrlGroup ? (
                       <>
-                        <span className="text-[10px] uppercase font-bold text-muted-foreground/60 block mb-2">Histórico de Automações em: {expandedUrlGroup}</span>
-                        <div className="space-y-2">
-                          {grouped[expandedUrlGroup].map(r => (
+                        {/* Per-site filter bar */}
+                        <div className="px-4 py-2.5 border-b border-border bg-accent/10 flex flex-wrap items-center gap-2">
+                          {/* Site title */}
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground truncate max-w-[200px]">
+                            <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+                            <span className="truncate">{expandedUrlGroup}</span>
+                          </div>
+
+                          <div className="ml-auto flex items-center gap-2 flex-wrap">
+                            {/* Test name search */}
+                            <div className="relative">
+                              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                              <input
+                                type="text"
+                                value={reportSearch}
+                                onChange={e => setReportSearch(e.target.value)}
+                                placeholder="Buscar teste..."
+                                className="pl-7 pr-3 py-1 text-[11px] rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 w-[140px]"
+                              />
+                              {reportSearch && (
+                                <button onClick={() => setReportSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Framework filter chips (only show if > 1 framework exists) */}
+                            {frameworksInSite.length > 1 && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => setReportFrameworkFilter("all")}
+                                  className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all",
+                                    reportFrameworkFilter === "all" ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:border-primary/20"
+                                  )}
+                                >
+                                  Todos
+                                </button>
+                                {frameworksInSite.map(fw => (
+                                  <button
+                                    key={fw}
+                                    onClick={() => setReportFrameworkFilter(reportFrameworkFilter === fw ? "all" : fw)}
+                                    className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all capitalize",
+                                      reportFrameworkFilter === fw ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:border-primary/20"
+                                    )}
+                                  >
+                                    {fw}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Sort toggle */}
+                            <button
+                              onClick={() => setReportSort(s => s === "newest" ? "oldest" : "newest")}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-border text-muted-foreground hover:text-foreground hover:border-primary/20 transition-all"
+                            >
+                              <ArrowUpDown className="w-3 h-3" />
+                              {reportSort === "newest" ? "Recente" : "Antigo"}
+                            </button>
+
+                            {/* Result count */}
+                            <span className="text-[10px] text-muted-foreground">{reportsForSite.length} teste{reportsForSite.length !== 1 ? "s" : ""}</span>
+                          </div>
+                        </div>
+
+                        {/* Report list */}
+                        <div className="overflow-y-auto max-h-[270px] p-3 space-y-2">
+                          {reportsForSite.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-2">
+                              <SlidersHorizontal className="w-5 h-5 opacity-40" />
+                              <p className="text-sm">Nenhum teste encontrado com esses filtros.</p>
+                              <button onClick={() => { setReportFrameworkFilter("all"); setReportSearch(""); }} className="text-xs text-primary hover:underline">
+                                Limpar filtros
+                              </button>
+                            </div>
+                          ) : reportsForSite.map(r => (
                             <button
                               key={r.id}
                               onClick={() => {
@@ -1004,15 +1236,30 @@ export function AutoWebTab() {
                                   }
                                 }
                               }}
-                              className={cn("w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all",
-                                selectedReport?.id === r.id ? "bg-primary/5 border-primary/40 shadow-sm" : "border-border/60 hover:border-primary/20 bg-accent/20"
+                              className={cn(
+                                "w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all",
+                                selectedReport?.id === r.id
+                                  ? "bg-primary/5 border-primary/40 shadow-sm ring-1 ring-primary/15"
+                                  : "border-border/60 hover:border-primary/20 bg-accent/20 hover:bg-accent/40"
                               )}
                             >
                               <div className="min-w-0 flex-1">
-                                <h4 className="text-sm font-semibold truncate text-foreground">{r.source_name || "Relatório"}</h4>
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                  {new Date(r.created_at).toLocaleString("pt-BR")} · <span className="capitalize">{r.framework}</span> · {r.model_used}
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <h4 className="text-sm font-semibold truncate text-foreground">{r.source_name || "Relatório"}</h4>
+                                  <span className={cn("text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0",
+                                    r.framework === "playwright" ? "bg-violet-500/15 text-violet-400" :
+                                    r.framework === "cypress" ? "bg-emerald-500/15 text-emerald-400" :
+                                    r.framework === "selenium" ? "bg-amber-500/15 text-amber-400" :
+                                    "bg-sky-500/15 text-sky-400"
+                                  )}>
+                                    {r.framework || "manual"}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(r.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                                  {r.model_used && r.model_used !== "manual" && <span className="ml-2 font-mono text-[10px]">· {r.model_used}</span>}
                                 </p>
+                                {r.description && <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{r.description}</p>}
                               </div>
                               <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0 ml-3", selectedReport?.id === r.id && "rotate-90 text-primary")} />
                             </button>
@@ -1022,7 +1269,7 @@ export function AutoWebTab() {
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full text-center p-6 text-muted-foreground">
                         <Globe className="w-8 h-8 opacity-30 mb-2" />
-                        <p className="text-sm">Selecione uma URL na coluna ao lado para visualizar os códigos e relatórios associados.</p>
+                        <p className="text-sm">Selecione um site na coluna ao lado para ver seus testes.</p>
                       </div>
                     )}
                   </div>
@@ -1485,9 +1732,9 @@ export function AutoWebTab() {
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                       <Terminal className="w-4 h-4" /> Terminal do Servidor
                     </p>
-                    <div className="bg-[#0f172a] rounded-xl p-4 overflow-x-auto overflow-y-auto max-h-[300px] border border-slate-800 shadow-inner flex flex-col flex-col-reverse">
+                    <div className="bg-[#0f172a] rounded-xl p-4 overflow-x-auto overflow-y-auto max-h-[300px] border border-slate-800 shadow-inner flex flex-col">
                       <pre className="text-[11px] font-mono leading-relaxed text-emerald-400/90 break-all whitespace-pre-wrap">
-                        {runnerLogs.join('\\n')}
+                        {runnerLogs.join('\n')}
                       </pre>
                     </div>
                   </div>

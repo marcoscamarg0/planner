@@ -7,6 +7,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { NewProjectModal } from "@/components/dashboard/NewProjectModal";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { createClient } from "@/lib/supabase/client";
 import type { Profile, Project } from "@/types";
 
 interface AppShellProps {
@@ -28,11 +29,22 @@ export function AppShell({ profile, projects, children }: AppShellProps) {
     router.refresh();
   };
 
+  const handleMoveProject = async (projectId: string, newParentId: string | null) => {
+    setProjectList((prev) =>
+      prev.map((p) => (p.id === projectId ? { ...p, parent_id: newParentId } : p))
+    );
+
+    const supabase = createClient();
+    await supabase.from("projects").update({ parent_id: newParentId }).eq("id", projectId);
+    router.refresh();
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar
         projects={projectList}
         onNewProject={() => setNewProjectOpen(true)}
+        onMoveProject={handleMoveProject}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -53,6 +65,7 @@ export function AppShell({ profile, projects, children }: AppShellProps) {
         open={newProjectOpen}
         onClose={() => setNewProjectOpen(false)}
         onCreated={handleProjectCreated}
+        projects={projectList}
       />
 
       <ChatSidebar open={chatOpen} onClose={() => setChatOpen(false)} />

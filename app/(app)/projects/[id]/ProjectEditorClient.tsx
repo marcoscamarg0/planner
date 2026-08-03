@@ -14,10 +14,12 @@ import {
   Clock,
   X,
   Download,
+  Network,
 } from "lucide-react";
 import { BlockEditor } from "@/components/editor/BlockEditor";
 import { InsightBadge } from "@/components/dashboard/InsightBadge";
 import { TaskPanel } from "@/components/dashboard/TaskPanel";
+import { TestFlowTab } from "@/components/projects/TestFlowTab";
 import { createClient } from "@/lib/supabase/client";
 import { extractTextFromTipTap, cn } from "@/lib/utils";
 import type { Project, Page, Task, AiInsight } from "@/types";
@@ -30,7 +32,7 @@ interface ProjectEditorClientProps {
   initialPage: Page | null;
 }
 
-type Tab = "editor" | "tasks";
+type Tab = "editor" | "tasks" | "flow";
 
 export function ProjectEditorClient({
   project,
@@ -351,6 +353,20 @@ export function ProjectEditorClient({
               )}
             </button>
             <button
+              id="tab-flow"
+              onClick={() => setTab("flow")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                tab === "flow"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              )}
+              aria-pressed={tab === "flow"}
+            >
+              <Network className="w-3.5 h-3.5" />
+              Fluxo
+            </button>
+            <button
               id="tab-report"
               onClick={() => router.push(`/projects/${project.id}/report`)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
@@ -482,6 +498,13 @@ export function ProjectEditorClient({
               tasks={tasks}
               projectId={project.id}
               onTasksChange={setTasks}
+            />
+          )}
+
+          {tab === "flow" && (
+            <TestFlowTab 
+              projectId={project.id} 
+              initialFlowData={project.flow_data} 
             />
           )}
         </div>

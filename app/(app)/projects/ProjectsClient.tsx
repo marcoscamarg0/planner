@@ -47,6 +47,11 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
     return matchSearch && matchStatus;
   });
 
+  const isFiltering = search.trim() !== "" || statusFilter !== "all";
+  const displayProjects = isFiltering ? filtered : projects.filter(p => !p.parent_id);
+  
+  const getSubProjects = (parentId: string) => projects.filter(p => p.parent_id === parentId);
+
   const statusFilters: { value: ProjectStatus | "all"; label: string }[] = [
     { value: "all", label: "Todos" },
     { value: "active", label: "Ativos" },
@@ -62,7 +67,7 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
           <div>
             <h1 className="text-2xl font-bold text-foreground">Projetos</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {projects.length} projeto{projects.length !== 1 ? "s" : ""}
+              {displayProjects.length} projeto{displayProjects.length !== 1 ? "s" : ""}
             </p>
           </div>
           <button
@@ -139,7 +144,7 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {displayProjects.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -163,8 +168,13 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
                 : "flex flex-col gap-3"
             )}
           >
-            {filtered.map((project, i) => (
-              <ProjectCard key={project.id} project={project} index={i} />
+            {displayProjects.map((project, i) => (
+              <ProjectCard 
+                key={project.id} 
+                project={project} 
+                subProjects={getSubProjects(project.id)}
+                index={i} 
+              />
             ))}
           </div>
         )}
@@ -174,6 +184,7 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
         open={newProjectOpen}
         onClose={() => setNewProjectOpen(false)}
         onCreated={handleProjectCreated}
+        projects={projects}
       />
     </>
   );

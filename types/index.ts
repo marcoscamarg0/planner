@@ -16,12 +16,14 @@ export interface Profile {
 
 export interface Project {
   id: string;
+  parent_id: string | null;
   owner_id: string;
   title: string;
   description: string | null;
   status: ProjectStatus;
   color: string;
   emoji: string | null;
+  flow_data?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +82,7 @@ export interface ProjectWithStats extends Project {
   pages_count: number;
   last_insight?: AiInsight;
   members?: ProjectMember[];
+  sub_projects?: ProjectWithStats[];
 }
 
 export interface TaskGroupedByStatus {

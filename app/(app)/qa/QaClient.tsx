@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FlaskConical,
@@ -38,6 +38,10 @@ import {
   Scale,
   Users,
   LayoutGrid,
+  Search,
+  SlidersHorizontal,
+  ArrowUpDown,
+  Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
@@ -270,6 +274,14 @@ export function QaClient({ projects }: QaClientProps) {
   const [selectedExportProjectId, setSelectedExportProjectId] = useState<string>("");
   const [isManagingReports, setIsManagingReports] = useState(false);
 
+  // History Filters
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyTypeFilter, setHistoryTypeFilter] = useState<string>("all");
+  const [historyModelFilter, setHistoryModelFilter] = useState<string>("all");
+  const [historyDateFilter, setHistoryDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [historySort, setHistorySort] = useState<"newest" | "oldest">("newest");
+  const [showHistoryFilters, setShowHistoryFilters] = useState(false);
+
 
   // Evidence upload for test cases
   const [activeEvidenceTcId, setActiveEvidenceTcId] = useState<string | null>(null);
@@ -475,6 +487,61 @@ export function QaClient({ projects }: QaClientProps) {
     if (showHistory) loadReports();
   }, [showHistory, loadReports]);
 
+  // Compute unique models found in reports for filter chips
+  const reportModels = useMemo(() => {
+    const models = new Set(reports.map(r => r.model_used).filter(Boolean));
+    return Array.from(models);
+  }, [reports]);
+
+  // Filtered + sorted reports
+  const filteredReports = useMemo(() => {
+    let filtered = [...reports];
+
+    // Search
+    if (historySearch.trim()) {
+      const q = historySearch.toLowerCase();
+      filtered = filtered.filter(r =>
+        r.title.toLowerCase().includes(q) ||
+        r.input_description?.toLowerCase().includes(q) ||
+        r.type.toLowerCase().includes(q)
+      );
+    }
+
+    // Type filter
+    if (historyTypeFilter !== "all") {
+      filtered = filtered.filter(r => r.type === historyTypeFilter);
+    }
+
+    // Model filter
+    if (historyModelFilter !== "all") {
+      filtered = filtered.filter(r => r.model_used === historyModelFilter);
+    }
+
+    // Date filter
+    if (historyDateFilter !== "all") {
+      const cutoff = new Date();
+      if (historyDateFilter === "today") cutoff.setHours(0, 0, 0, 0);
+      else if (historyDateFilter === "7d") cutoff.setDate(cutoff.getDate() - 7);
+      else if (historyDateFilter === "30d") cutoff.setDate(cutoff.getDate() - 30);
+      filtered = filtered.filter(r => new Date(r.created_at) >= cutoff);
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return historySort === "newest" ? diff : -diff;
+    });
+
+    return filtered;
+  }, [reports, historySearch, historyTypeFilter, historyModelFilter, historyDateFilter, historySort]);
+
+  // Count by type for badge
+  const countByType = useMemo(() => {
+    const counts: Record<string, number> = {};
+    reports.forEach(r => { counts[r.type] = (counts[r.type] || 0) + 1; });
+    return counts;
+  }, [reports]);
+
   // Sync test cases and raw result when a report is loaded/selected
   useEffect(() => {
     if (selectedReport) {
@@ -482,7 +549,11 @@ export function QaClient({ projects }: QaClientProps) {
       if (selectedReport.type === "test_cases" && selectedReport.result_json) {
         try {
           const parsed = selectedReport.result_json as any;
-          setTestCases(parsed.test_cases || []);
+          const tcs = (parsed.test_cases || []).map((tc: any, idx: number) => ({
+            ...tc,
+            id: tc.id || `tc-${selectedReport.id}-${idx}`
+          }));
+          setTestCases(tcs);
         } catch {
           setTestCases([]);
         }
@@ -593,7 +664,11 @@ export function QaClient({ projects }: QaClientProps) {
         try {
           const jsonStr = data.result.replace(/```json\n?|\n?```/g, "").trim();
           const parsed = JSON.parse(jsonStr);
-          setTestCases(parsed.test_cases || []);
+          const tcs = (parsed.test_cases || []).map((tc: any, idx: number) => ({
+            ...tc,
+            id: tc.id || `tc-new-${Date.now()}-${idx}`
+          }));
+          setTestCases(tcs);
         } catch {
           setResult(data.result);
         }
@@ -1240,6 +1315,152 @@ export function QaClient({ projects }: QaClientProps) {
                     </div>
                   ) : (
                     <div className="flex flex-col">
+                      {/* Filter Bar */}
+                      <div className="px-4 py-3 border-b border-border bg-accent/20 space-y-2">
+                        {/* Search + toggle */}
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                            <input
+                              type="text"
+                              value={historySearch}
+                              onChange={e => setHistorySearch(e.target.value)}
+                              placeholder="Buscar por título ou descrição..."
+                              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            />
+                            {historySearch && (
+                              <button onClick={() => setHistorySearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setShowHistoryFilters(f => !f)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                              showHistoryFilters ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                            Filtros
+                            {(historyTypeFilter !== "all" || historyModelFilter !== "all" || historyDateFilter !== "all") && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-primary ml-0.5" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => setHistorySort(s => s === "newest" ? "oldest" : "newest")}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:text-foreground transition-all"
+                          >
+                            <ArrowUpDown className="w-3.5 h-3.5" />
+                            {historySort === "newest" ? "Recente" : "Antigo"}
+                          </button>
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            {filteredReports.length} de {reports.length}
+                          </span>
+                        </div>
+
+                        {/* Extended filters */}
+                        <AnimatePresence>
+                          {showHistoryFilters && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="pt-2 space-y-2">
+                                {/* Type chips */}
+                                <div className="flex flex-wrap gap-1.5">
+                                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider self-center mr-1">Tipo:</span>
+                                  <button
+                                    onClick={() => setHistoryTypeFilter("all")}
+                                    className={cn("px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all",
+                                      historyTypeFilter === "all" ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:border-primary/20"
+                                    )}
+                                  >
+                                    Todos ({reports.length})
+                                  </button>
+                                  {Object.entries(TYPE_LABEL).map(([key, label]) => {
+                                    const count = countByType[key] || 0;
+                                    if (!count) return null;
+                                    return (
+                                      <button
+                                        key={key}
+                                        onClick={() => setHistoryTypeFilter(historyTypeFilter === key ? "all" : key)}
+                                        className={cn(
+                                          "px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all",
+                                          historyTypeFilter === key
+                                            ? cn(TYPE_COLOR[key] || "text-primary bg-primary/10", "border-current/30")
+                                            : "border-border text-muted-foreground hover:border-primary/20"
+                                        )}
+                                      >
+                                        {label} ({count})
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Model chips */}
+                                {reportModels.length > 1 && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider self-center mr-1">Modelo:</span>
+                                    <button
+                                      onClick={() => setHistoryModelFilter("all")}
+                                      className={cn("px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all",
+                                        historyModelFilter === "all" ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:border-primary/20"
+                                      )}
+                                    >
+                                      Todos
+                                    </button>
+                                    {reportModels.map(m => (
+                                      <button
+                                        key={m}
+                                        onClick={() => setHistoryModelFilter(historyModelFilter === m ? "all" : m)}
+                                        className={cn(
+                                          "px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all font-mono",
+                                          historyModelFilter === m ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:border-primary/20"
+                                        )}
+                                      >
+                                        {m}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Date filter */}
+                                <div className="flex flex-wrap gap-1.5">
+                                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider self-center mr-1">Período:</span>
+                                  {(["all", "today", "7d", "30d"] as const).map(d => {
+                                    const labels = { all: "Sempre", today: "Hoje", "7d": "Últimos 7 dias", "30d": "Últimos 30 dias" };
+                                    return (
+                                      <button
+                                        key={d}
+                                        onClick={() => setHistoryDateFilter(d)}
+                                        className={cn(
+                                          "px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all",
+                                          historyDateFilter === d ? "bg-primary/15 text-primary border-primary/30" : "border-border text-muted-foreground hover:border-primary/20"
+                                        )}
+                                      >
+                                        {labels[d]}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Reset */}
+                                {(historyTypeFilter !== "all" || historyModelFilter !== "all" || historyDateFilter !== "all" || historySearch) && (
+                                  <button
+                                    onClick={() => { setHistoryTypeFilter("all"); setHistoryModelFilter("all"); setHistoryDateFilter("all"); setHistorySearch(""); }}
+                                    className="text-[10px] font-semibold text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-1"
+                                  >
+                                    <X className="w-3 h-3" /> Limpar filtros
+                                  </button>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
                       {/* Toolbar */}
                       <AnimatePresence>
                         {selectedReportIds.length > 0 && (
@@ -1283,7 +1504,12 @@ export function QaClient({ projects }: QaClientProps) {
                       </AnimatePresence>
 
                       <div className="flex flex-col gap-2 p-3 max-h-[400px] overflow-y-auto bg-muted/10">
-                        {reports.map(r => (
+                        {filteredReports.length === 0 ? (
+                          <div className="text-center py-8 text-sm text-muted-foreground">
+                            <Filter className="w-6 h-6 mx-auto mb-2 opacity-40" />
+                            Nenhum relatório encontrado com esses filtros.
+                          </div>
+                        ) : filteredReports.map(r => (
                           <div
                             key={r.id}
                             className={cn(
@@ -1293,12 +1519,12 @@ export function QaClient({ projects }: QaClientProps) {
                             )}
                             onClick={() => setSelectedReport(selectedReport?.id === r.id ? null : r)}
                           >
-                            <div className="flex items-center shrink-0" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center shrink-0" onClick={e => { e.stopPropagation(); toggleReportSelection(e, r.id); }}>
                               <input
                                 type="checkbox"
                                 checked={selectedReportIds.includes(r.id)}
-                                onChange={(e) => toggleReportSelection(e as any, r.id)}
-                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-1"
+                                onChange={() => {}}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-1 cursor-pointer"
                               />
                             </div>
                             <span className={cn("text-[10px] font-bold px-2.5 py-1 rounded-md shrink-0 uppercase tracking-wide", TYPE_COLOR[r.type] || "text-muted-foreground bg-accent")}>

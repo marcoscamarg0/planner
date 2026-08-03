@@ -64,6 +64,7 @@ async function executeStep(
 ): Promise<StepResult> {
   const startTime = Date.now();
   let screenshotBase64: string | undefined;
+  let screenshotElementBase64: string | undefined;
 
   const takeScreenshot = async (): Promise<string | undefined> => {
     try {
@@ -93,7 +94,7 @@ async function executeStep(
       await page.goto(step.value || targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await autoAcceptCookies(page);
       await page.waitForTimeout(1000);
-      screenshotBase64 = await takeScreenshot();
+      
       return {
         index, label: step.label, status: 'aprovado',
         detalhe: `Navegou para: ${step.value || targetUrl}`,
@@ -104,7 +105,7 @@ async function executeStep(
     if (step.action === 'wait') {
       await job.log(`[Passo #${index}] Ação: WAIT -> ${step.milliseconds || 1000}ms`);
       await page.waitForTimeout(step.milliseconds || 1000);
-      screenshotBase64 = await takeScreenshot();
+      
       return {
         index, label: step.label, status: 'aprovado',
         detalhe: `Aguardou ${step.milliseconds || 1000}ms`, screenshotBase64, duration: Date.now() - startTime,
@@ -115,7 +116,7 @@ async function executeStep(
       await job.log(`[Passo #${index}] Ação: SCROLL`);
       await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.7));
       await page.waitForTimeout(800);
-      screenshotBase64 = await takeScreenshot();
+      
       return {
         index, label: step.label, status: 'aprovado',
         detalhe: 'Rolagem da página executada.', screenshotBase64, duration: Date.now() - startTime,
@@ -165,6 +166,12 @@ async function executeStep(
 
     await page.waitForTimeout(400);
 
+    // Evidência pequena do elemento antes do clique/ação
+    if (step.action === 'click' || !step.action) {
+      const buf = await locator.screenshot({ type: 'jpeg', quality: 80, timeout: 5000 }).catch(() => null);
+      if (buf) screenshotElementBase64 = buf.toString('base64');
+    }
+
     // Remover highlight
     if (originalStyle) {
       await locator.evaluate((el: HTMLElement, old: any) => {
@@ -205,8 +212,10 @@ async function executeStep(
       ]);
     }
 
-    // Screenshot APÓS a ação — captura o estado resultante
-    screenshotBase64 = await takeScreenshot();
+    // Evidência de tela cheia APENAS após clique, conforme solicitado
+    if (step.action === 'click' || !step.action) {
+      screenshotBase64 = await takeScreenshot();
+    }
 
     const activeUrl = page.context().pages().slice(-1)[0].url();
     let detalhe = step.action === 'type'
@@ -223,7 +232,7 @@ async function executeStep(
 
     return {
       index, label: step.label, status: 'aprovado',
-      detalhe, screenshotBase64, duration: Date.now() - startTime,
+      detalhe, screenshotBase64, screenshotElementBase64, duration: Date.now() - startTime,
     };
 
   } catch (err: unknown) {
@@ -239,7 +248,7 @@ async function executeStep(
     return {
       index, label: step.label, status: 'falha_clique',
       detalhe: `Falha na execução: ${msg.substring(0, 200)}`,
-      screenshotBase64, duration: Date.now() - startTime,
+      screenshotBase64, screenshotElementBase64, duration: Date.now() - startTime,
     };
   }
 }

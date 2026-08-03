@@ -44,6 +44,7 @@ export interface StepResult {
   status: 'aprovado' | 'falha_clique' | 'erro_js' | 'sem_texto' | 'pulado';
   detalhe: string;
   screenshotBase64?: string;
+  screenshotElementBase64?: string;
   duration?: number;          // ms
 }
 

@@ -32,6 +32,7 @@ interface StepResult {
   status: "aprovado" | "falha_clique" | "erro_js" | "pulado";
   detalhe: string;
   screenshotBase64?: string;
+  screenshotElementBase64?: string;
   duration?: number;
 }
 
@@ -145,7 +146,40 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
 
   useEffect(() => { loadHistory(); }, []);
 
-  // Efeito para carregar o histórico baseado na URL atual
+  // Carrega o estado salvo no localStorage (cookies/sessão do navegador)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("smartRunnerState");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.targetUrl) setTargetUrl(parsed.targetUrl);
+        if (parsed.flowDescription) setFlowDescription(parsed.flowDescription);
+        if (parsed.jobName) setJobName(parsed.jobName);
+        if (parsed.testType) setTestType(parsed.testType);
+        if (parsed.model) setModel(parsed.model);
+        if (parsed.includeAxe !== undefined) setIncludeAxe(parsed.includeAxe);
+      }
+    } catch (e) {
+      console.error("Falha ao carregar estado do localStorage", e);
+    }
+  }, []);
+
+  // Salva o estado no localStorage sempre que ele mudar
+  useEffect(() => {
+    try {
+      const state = {
+        targetUrl,
+        flowDescription,
+        jobName,
+        testType,
+        model,
+        includeAxe
+      };
+      localStorage.setItem("smartRunnerState", JSON.stringify(state));
+    } catch (e) {
+      console.error("Falha ao salvar estado no localStorage", e);
+    }
+  }, [targetUrl, flowDescription, jobName, testType, model, includeAxe]);  // Efeito para carregar o histórico baseado na URL atual
   useEffect(() => {
     const fetchUrlHistory = async () => {
       if (!targetUrl || targetUrl.length < 5) {
@@ -247,6 +281,25 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
           }
         }
         setContextImages(prev => [...prev, ...images]);
+        setIsProcessingFile(false);
+      } else if (file.type === "application/json" || file.name.endsWith(".json")) {
+        const text = await file.text();
+        try {
+          const json = JSON.parse(text);
+          if (json.targetUrl || json.url) setTargetUrl(json.targetUrl || json.url);
+          if (json.jobName || json.title || json.name) {
+            let name = json.jobName || json.title || json.name;
+            if (name.startsWith("Auditoria IA: ")) name = name.replace("Auditoria IA: ", "");
+            setJobName(name);
+          }
+          if (json.flowDescription || json.description || json.input_description) {
+            setFlowDescription(json.flowDescription || json.description || json.input_description);
+          }
+          if (json.testType) setTestType(json.testType);
+          if (json.model) setModel(json.model);
+        } catch (e) {
+          alert("Arquivo JSON inválido.");
+        }
         setIsProcessingFile(false);
       }
     } catch (err) {
@@ -412,15 +465,15 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
 
       {/* ── Hero Header ──────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl p-8 mb-8 bg-gradient-to-br from-indigo-900/20 via-violet-900/10 to-transparent border border-indigo-500/20 text-center">
-        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
+      <div className="relative overflow-hidden rounded-3xl p-8 mb-8 bg-gradient-to-br from-indigo-50/90 via-white to-indigo-50/30 dark:from-indigo-900/20 dark:via-violet-900/10 dark:to-transparent border border-indigo-100 dark:border-indigo-500/20 text-center shadow-sm dark:shadow-none">
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 dark:opacity-20 mix-blend-overlay"></div>
         <div className="relative z-10 space-y-4">
-          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-bold uppercase tracking-widest shadow-[0_0_15px_rgba(99,102,241,0.2)]">
-            <Zap className="w-4 h-4 text-indigo-400" />
+          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-white dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-widest shadow-sm dark:shadow-[0_0_15px_rgba(99,102,241,0.2)]">
+            <Zap className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
             Smart Runner Studio
           </div>
-          <h2 className="text-3xl md:text-5xl font-extrabold text-foreground tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
-            Validação de Software com <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-400">Inteligência</span>
+          <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-gray-800 to-gray-500 dark:from-white dark:to-white/60">
+            Validação de Software com <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 to-violet-500 dark:from-indigo-400 dark:to-violet-400">Inteligência</span>
           </h2>
           <p className="text-sm md:text-base text-muted-foreground max-w-2xl mx-auto font-medium">
             Escolha um tipo de teste, defina o alvo e deixe o robô fazer o trabalho duro. Ao final, obtenha evidências ricas e prontas para auditoria.
@@ -434,7 +487,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-3xl border border-white/5 bg-black/40 backdrop-blur-2xl p-6 md:p-8 space-y-8 shadow-2xl"
+            className="rounded-3xl border border-border dark:border-white/5 bg-card dark:bg-black/40 backdrop-blur-2xl p-6 md:p-8 space-y-8 shadow-2xl"
           >
             {/* Seção 1: URL */}
             <div className="space-y-2.5">
@@ -448,7 +501,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                   value={targetUrl}
                   onChange={e => setTargetUrl(e.target.value)}
                   placeholder="https://www.exemplo.com.br"
-                  className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white/5 border border-white/10 text-base font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 focus:bg-white/10 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                  className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 shadow-sm dark:shadow-none text-base font-medium placeholder:text-muted-foreground/60 focus:outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 transition-all"
                 />
               </div>
             </div>
@@ -473,15 +526,15 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                       onClick={() => setTestType(t.key)}
                       className={cn(
                         "relative flex flex-col items-start p-4 rounded-2xl border text-left transition-all duration-300 overflow-hidden group",
-                        isActive ? `bg-gradient-to-br ${t.color} ${t.border} shadow-[0_0_20px_rgba(0,0,0,0.1)]` : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"
+                        isActive ? `bg-gradient-to-br ${t.color} ${t.border} shadow-[0_0_20px_rgba(0,0,0,0.05)] dark:shadow-[0_0_20px_rgba(0,0,0,0.1)]` : "bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 shadow-sm dark:shadow-none hover:border-indigo-300 dark:hover:border-white/20 hover:shadow-md dark:hover:shadow-none"
                       )}
                     >
-                      {isActive && <div className="absolute inset-0 bg-white/5 opacity-50 mix-blend-overlay pointer-events-none"></div>}
-                      <div className={cn("p-2 rounded-xl mb-3 transition-colors", isActive ? "bg-white/10" : "bg-white/5 group-hover:bg-white/10")}>
-                        <Icon className={cn("w-5 h-5", isActive ? t.text : "text-muted-foreground")} />
+                      {isActive && <div className="absolute inset-0 bg-white/40 dark:bg-white/5 opacity-50 mix-blend-overlay pointer-events-none"></div>}
+                      <div className={cn("p-2 rounded-xl mb-3 transition-colors", isActive ? "bg-white/60 dark:bg-white/10" : "bg-gray-100 dark:bg-white/5 group-hover:bg-indigo-50 dark:group-hover:bg-white/10")}>
+                        <Icon className={cn("w-5 h-5", isActive ? t.text : "text-gray-500 dark:text-muted-foreground group-hover:text-indigo-500 dark:group-hover:text-muted-foreground")} />
                       </div>
-                      <h4 className={cn("font-bold text-sm", isActive ? "text-foreground" : "text-foreground/80")}>{t.title}</h4>
-                      <p className="text-xs text-muted-foreground mt-0.5">{t.desc}</p>
+                      <h4 className={cn("font-bold text-sm", isActive ? "text-gray-900 dark:text-foreground" : "text-gray-700 dark:text-foreground/80 group-hover:text-gray-900 dark:group-hover:text-foreground")}>{t.title}</h4>
+                      <p className="text-xs text-gray-500 dark:text-muted-foreground mt-0.5">{t.desc}</p>
                     </button>
                   );
                 })}
@@ -511,7 +564,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                   value={flowDescription}
                   onChange={(e) => setFlowDescription(e.target.value)}
                   placeholder="Descreva o fluxo que a IA deve executar na página..."
-                  className="w-full h-32 px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm text-foreground focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 transition-all resize-none font-mono placeholder:text-muted-foreground/50 shadow-inner"
+                  className="w-full h-32 px-5 py-4 bg-slate-900 text-slate-50 border border-slate-800 dark:border-white/10 rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all resize-none font-mono placeholder:text-slate-400 shadow-inner"
                 />
               </div>
             )}
@@ -524,11 +577,11 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                     Imagens de Contexto <span className="text-muted-foreground/60 font-medium normal-case text-[10px] ml-1">(Opcional)</span>
                   </label>
                 </div>
-                <div className="border border-dashed border-white/20 rounded-2xl p-6 bg-white/5 flex flex-col items-center justify-center gap-3 transition-colors hover:bg-white/10 hover:border-indigo-500/30 relative group overflow-hidden">
+                <div className="border border-dashed border-gray-300 dark:border-white/20 rounded-2xl p-6 bg-white dark:bg-white/5 shadow-sm dark:shadow-none flex flex-col items-center justify-center gap-3 transition-colors hover:bg-gray-50 dark:hover:bg-white/10 hover:border-indigo-300 dark:hover:border-indigo-500/30 relative group overflow-hidden">
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,application/pdf"
+                    accept="image/*,application/pdf,application/json,.json"
                     onChange={handleFileUpload}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                     title="Envie uma imagem ou PDF (Max 5 pags)"
@@ -550,7 +603,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                       {contextImages.map((img, i) => (
                         <div key={i} className="relative w-16 h-16 rounded-xl overflow-hidden border border-white/20 shadow-lg group/img">
                           <img src={img} alt={`Context ${i}`} className="w-full h-full object-cover transition-transform group-hover/img:scale-110" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                          <div className="absolute inset-0 bg-black/20 dark:bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
                             <button
                               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setContextImages(prev => prev.filter((_, idx) => idx !== i)); }}
                               className="bg-rose-500 text-white rounded-full p-1.5 hover:scale-110 transition-transform"
@@ -577,7 +630,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                   value={jobName}
                   onChange={e => setJobName(e.target.value)}
                   placeholder="Ex: Validação do fluxo de Login"
-                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all placeholder:text-muted-foreground/50"
+                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 shadow-sm dark:shadow-none text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all placeholder:text-muted-foreground/50"
                 />
               </div>
             </div>
@@ -587,7 +640,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
               <div className="relative w-full sm:w-auto">
                 <button
                   onClick={() => setShowModelMenu(!showModelMenu)}
-                  className="w-full sm:w-auto flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-sm font-medium transition-all"
+                  className="w-full sm:w-auto flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm dark:shadow-none text-sm font-medium transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <Bot className="w-4 h-4 text-indigo-400" />
@@ -677,7 +730,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 16 }}
-            className="rounded-3xl border border-white/5 bg-black/40 backdrop-blur-2xl p-6 md:p-8 space-y-4 shadow-2xl"
+            className="rounded-3xl border border-border dark:border-white/5 bg-card dark:bg-black/40 backdrop-blur-2xl p-6 md:p-8 space-y-4 shadow-2xl"
           >
             <div className="flex items-center gap-2 mb-2">
               <BarChart3 className="w-5 h-5 text-indigo-400" />
@@ -691,9 +744,9 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
               Execuções anteriores encontradas para este site.
             </p>
 
-            <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5">
+            <div className="overflow-x-auto rounded-xl border border-border dark:border-white/10 bg-muted/30 dark:bg-white/5">
               <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-white/5 border-b border-white/10 text-xs uppercase tracking-wider text-muted-foreground/80">
+                <thead className="bg-muted/50 dark:bg-white/5 border-b border-border dark:border-white/10 text-xs uppercase tracking-wider text-muted-foreground/80">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Status</th>
                     <th className="px-4 py-3 font-semibold">Data/Hora</th>
@@ -714,7 +767,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                     const motor = item.model_used || 'Desconhecido';
 
                     return (
-                      <tr key={item.id} className="hover:bg-white/5 transition-colors">
+                      <tr key={item.id} className="hover:bg-muted/50 dark:hover:bg-white/5 transition-colors">
                         <td className="px-4 py-3">
                           <span className={cn(
                             "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
@@ -732,12 +785,12 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
                             {rj.htmlReportUrl && (
-                              <a href={rj.htmlReportUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-indigo-400 bg-white/5 hover:bg-indigo-500/10 rounded-md transition-colors" title="Ver HTML">
+                              <a href={rj.htmlReportUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-indigo-400 bg-muted/50 dark:bg-white/5 hover:bg-indigo-500/10 rounded-md transition-colors" title="Ver HTML">
                                 <Eye className="w-4 h-4" />
                               </a>
                             )}
                             {rj.pdfUrl && (
-                              <a href={rj.pdfUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-violet-400 bg-white/5 hover:bg-violet-500/10 rounded-md transition-colors" title="Baixar PDF">
+                              <a href={rj.pdfUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-violet-400 bg-muted/50 dark:bg-white/5 hover:bg-violet-500/10 rounded-md transition-colors" title="Baixar PDF">
                                 <FileDown className="w-4 h-4" />
                               </a>
                             )}
@@ -760,7 +813,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0 }}
-            className="rounded-3xl border border-indigo-500/30 bg-black/60 backdrop-blur-3xl p-10 text-center space-y-8 shadow-[0_0_50px_rgba(99,102,241,0.15)] relative overflow-hidden"
+            className="rounded-3xl border border-indigo-500/30 bg-card/90 dark:bg-black/60 backdrop-blur-3xl p-10 text-center space-y-8 shadow-[0_0_50px_rgba(99,102,241,0.15)] relative overflow-hidden"
           >
             <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none"></div>
             
@@ -803,7 +856,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                         "w-10 h-10 rounded-2xl flex items-center justify-center border transition-all duration-500",
                         isDone  ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)]" :
                         isActive? "bg-indigo-500/20 border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" :
-                                 "bg-white/5 border-white/10"
+                                 "bg-muted/50 dark:bg-white/5 border-border dark:border-white/10"
                       )}>
                         {isDone
                           ? <CheckCircle className="w-5 h-5 text-emerald-400" />
@@ -814,27 +867,27 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                         {s.label}
                       </span>
                     </div>
-                    {i < 4 && <div className={cn("w-4 md:w-8 h-[2px] rounded-full", isDone ? "bg-emerald-500/50" : "bg-white/10")} />}
+                    {i < 4 && <div className={cn("w-4 md:w-8 h-[2px] rounded-full", isDone ? "bg-emerald-500/50" : "bg-border dark:bg-white/10")} />}
                   </div>
                 );
               })}
             </div>
 
             {/* Terminal de Logs */}
-            <div className="mt-6 rounded-lg bg-[#0D1117] border border-border p-4 h-56 overflow-y-auto text-left font-mono text-xs flex flex-col gap-1 w-full max-w-3xl mx-auto shadow-inner relative flex-col-reverse">
-              <div className="absolute top-2 right-3 text-emerald-400 font-sans text-[10px] uppercase font-bold flex items-center gap-1 bg-[#0D1117] px-2 rounded-full border border-emerald-500/20">
+            <div className="mt-6 rounded-lg bg-slate-50 dark:bg-[#0D1117] border border-border p-4 h-56 overflow-y-auto text-left font-mono text-xs flex flex-col gap-1 w-full max-w-3xl mx-auto shadow-inner relative flex-col-reverse">
+              <div className="absolute top-2 right-3 text-emerald-500 dark:text-emerald-400 font-sans text-[10px] uppercase font-bold flex items-center gap-1 bg-slate-100 dark:bg-[#0D1117] px-2 rounded-full border border-emerald-500/30 dark:border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
               </div>
               <div className="flex flex-col gap-1 w-full">
                 {logs.length === 0 && <span className="text-muted-foreground">Aguardando início do stream...</span>}
                 {logs.map((log, idx) => (
                   <div key={idx} className={
-                    log.includes('✅ Aprovado') ? 'text-emerald-400' :
-                    log.includes('❌ Falhou') || log.includes('Falha') || log.includes('Erro') ? 'text-rose-400' :
-                    log.startsWith('[SmartRun]') ? 'text-violet-300 font-semibold' :
-                    'text-slate-300'
+                    log.includes('✅ Aprovado') ? 'text-emerald-600 dark:text-emerald-400' :
+                    log.includes('❌ Falhou') || log.includes('Falha') || log.includes('Erro') ? 'text-rose-600 dark:text-rose-400' :
+                    log.startsWith('[SmartRun]') ? 'text-violet-700 dark:text-violet-300 font-semibold' :
+                    'text-slate-700 dark:text-slate-300'
                   }>
-                    <span className="text-slate-500 mr-2 text-[10px]">&gt;</span>
+                    <span className="text-slate-400 dark:text-slate-500 mr-2 text-[10px]">&gt;</span>
                     {log}
                   </div>
                 ))}
@@ -897,6 +950,37 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                     PDF Original
                   </a>
                 )}
+                <button
+                  onClick={async () => {
+                    if (!result) return;
+                    try {
+                      const res = await fetch('/api/automation/export-project', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          targetUrl: result.targetUrl,
+                          jobName: result.jobName,
+                          rawSteps: (result as any).rawSteps
+                        })
+                      });
+                      if (!res.ok) throw new Error('Falha ao exportar');
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'automacao.tar.gz';
+                      a.click();
+                      window.URL.revokeObjectURL(url);
+                    } catch (e) {
+                      console.error(e);
+                      alert('Erro ao baixar o projeto');
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400 hover:bg-emerald-500/20 transition-all shadow-sm font-semibold"
+                >
+                  <Code className="w-4 h-4" />
+                  Baixar Projeto
+                </button>
                 {result.pdfUrl && onImportPdf && (
                   <button
                     onClick={() => onImportPdf(result.pdfUrl!)}
@@ -1012,7 +1096,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
               ].map(m => {
                 const Icon = m.icon;
                 return (
-                  <div key={m.label} className={cn("relative group overflow-hidden rounded-2xl p-5 border text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-xl", m.border, "bg-white/5")}>
+                  <div key={m.label} className={cn("relative group overflow-hidden rounded-2xl p-5 border text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-xl", m.border, "bg-muted/50 dark:bg-white/5")}>
                     <div className={cn("absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none", m.bg)}></div>
                     <Icon className={cn("w-6 h-6 mx-auto mb-3", m.color)} />
                     <p className={cn("text-3xl font-extrabold tracking-tight", m.color)}>{m.value}</p>
@@ -1112,15 +1196,25 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                             </div>
                             <span className="text-xs text-muted-foreground/60 shrink-0">#{step.index}</span>
                           </div>
-                          {step.screenshotBase64 && (
-                            <div className="mt-3 ml-9">
-                              <img
-                                src={`data:image/jpeg;base64,${step.screenshotBase64}`}
-                                alt={`Evidência passo ${step.index}`}
-                                className="rounded-lg border border-border max-h-96 object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity"
-                                onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotBase64}`, "_blank")}
-                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                              />
+                          {(step.screenshotBase64 || step.screenshotElementBase64) && (
+                            <div className="mt-3 ml-9 relative">
+                              {step.screenshotBase64 && (
+                                <img
+                                  src={`data:image/jpeg;base64,${step.screenshotBase64}`}
+                                  alt={`Evidência passo ${step.index}`}
+                                  className="rounded-lg border border-border max-h-96 object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity w-full"
+                                  onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotBase64}`, "_blank")}
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                              )}
+                              {step.screenshotElementBase64 && (
+                                <img
+                                  src={`data:image/jpeg;base64,${step.screenshotElementBase64}`}
+                                  alt="Elemento interagido"
+                                  className="absolute bottom-4 right-4 max-w-[250px] max-h-[200px] border-2 border-red-500 rounded-md shadow-lg bg-white object-contain cursor-pointer hover:scale-105 transition-transform"
+                                  onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotElementBase64}`, "_blank")}
+                                />
+                              )}
                             </div>
                           )}
                         </div>
@@ -1325,14 +1419,25 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
                                           </div>
 
                                           {/* Screenshot */}
-                                          {step.screenshotBase64 && (
-                                            <img
-                                              src={`data:image/jpeg;base64,${step.screenshotBase64}`}
-                                              alt={`Evidência passo ${step.index}`}
-                                              className="rounded-lg border border-border w-full max-h-72 object-contain shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
-                                              onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotBase64}`, '_blank')}
-                                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                            />
+                                          {(step.screenshotBase64 || step.screenshotElementBase64) && (
+                                            <div className="relative mt-3">
+                                              {step.screenshotBase64 && (
+                                                <img
+                                                  src={`data:image/jpeg;base64,${step.screenshotBase64}`}
+                                                  alt={`Evidência passo ${step.index}`}
+                                                  className="rounded-lg border border-border w-full max-h-72 object-contain shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
+                                                  onClick={() => window.open(`data:image/jpeg;base64,${step.screenshotBase64}`, '_blank')}
+                                                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                                />
+                                              )}
+                                              {step.screenshotElementBase64 && (
+                                                <img
+                                                  src={`data:image/jpeg;base64,${step.screenshotElementBase64}`}
+                                                  alt="Elemento interagido"
+                                                  className="absolute bottom-4 right-4 max-w-[250px] max-h-[200px] border-2 border-red-500 rounded-md shadow-lg bg-white object-contain"
+                                                />
+                                              )}
+                                            </div>
                                           )}
                                         </div>
                                       </div>
