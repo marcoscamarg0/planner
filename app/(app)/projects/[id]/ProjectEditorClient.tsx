@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -15,11 +15,13 @@ import {
   X,
   Download,
   Network,
+  TestTube2,
 } from "lucide-react";
 import { BlockEditor } from "@/components/editor/BlockEditor";
 import { InsightBadge } from "@/components/dashboard/InsightBadge";
 import { TaskPanel } from "@/components/dashboard/TaskPanel";
 import { TestFlowTab } from "@/components/projects/TestFlowTab";
+import { QaClient } from "@/app/(app)/qa/QaClient";
 import { createClient } from "@/lib/supabase/client";
 import { extractTextFromTipTap, cn } from "@/lib/utils";
 import type { Project, Page, Task, AiInsight } from "@/types";
@@ -32,7 +34,7 @@ interface ProjectEditorClientProps {
   initialPage: Page | null;
 }
 
-type Tab = "editor" | "tasks" | "flow";
+type Tab = "editor" | "tasks" | "flow" | "qa";
 
 export function ProjectEditorClient({
   project,
@@ -45,13 +47,16 @@ export function ProjectEditorClient({
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [insights, setInsights] = useState<AiInsight[]>(initialInsights);
   const [selectedPage, setSelectedPage] = useState<Page | null>(initialPage);
-  const [tab, setTab] = useState<Tab>("editor");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Initialize the active tab from the URL ?tab= parameter
+  const initialTab = (searchParams?.get("tab") as Tab) || "editor";
+  const [tab, setTab] = useState<Tab>(["editor", "tasks", "flow", "qa"].includes(initialTab) ? initialTab : "editor");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [suggestedTasks, setSuggestedTasks] = useState<string[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const aiDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const router = useRouter();
 
   const createPage = async () => {
     const supabase = createClient();
@@ -367,6 +372,20 @@ export function ProjectEditorClient({
               Fluxo
             </button>
             <button
+              id="tab-qa"
+              onClick={() => setTab("qa")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                tab === "qa"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              )}
+              aria-pressed={tab === "qa"}
+            >
+              <TestTube2 className="w-3.5 h-3.5" />
+              QA & Testes
+            </button>
+            <button
               id="tab-report"
               onClick={() => router.push(`/projects/${project.id}/report`)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
@@ -506,6 +525,10 @@ export function ProjectEditorClient({
               projectId={project.id} 
               initialFlowData={project.flow_data} 
             />
+          )}
+
+          {tab === "qa" && (
+            <QaClient projectId={project.id} />
           )}
         </div>
       </div>

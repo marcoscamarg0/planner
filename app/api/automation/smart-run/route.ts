@@ -224,6 +224,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
   const start = Date.now();
   let screenshotBase64: string | undefined;
   let screenshotElementBase64: string | undefined;
+  const lower = (step.label || '').toLowerCase();
 
   // `page` is always the ORIGINAL page (first tab). We use it as the anchor.
   const getActivePage = () => {
@@ -290,27 +291,31 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
         try {
           externalPage = await page.context().newPage();
           await externalPage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          screenshotBase64 = await takeScreenshot(externalPage);
           await externalPage.close();
         } catch { }
-        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + dest, duration: Date.now() - start };
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + dest, screenshotBase64, duration: Date.now() - start };
       }
 
       await activePage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
       await autoAcceptCookies(activePage);
-      return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + dest, duration: Date.now() - start };
+      screenshotBase64 = await takeScreenshot(activePage);
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + dest, screenshotBase64, duration: Date.now() - start };
     }
 
     if (lower.includes('aguardar') || lower.includes('wait')) {
       const ms = step.milliseconds || 2000;
       await activePage.waitForTimeout(ms);
-      return { index, label: step.label, status: 'aprovado', detalhe: 'Aguardou ' + ms + 'ms', duration: Date.now() - start };
+      screenshotBase64 = await takeScreenshot(activePage);
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Aguardou ' + ms + 'ms', screenshotBase64, duration: Date.now() - start };
     }
 
     if (step.action === 'scroll') {
       if (lower.includes('rolar') || lower.includes('scroll')) {
         await activePage.mouse.wheel(0, 800);
         await activePage.waitForTimeout(1000);
-        return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', duration: Date.now() - start };
+        screenshotBase64 = await takeScreenshot(activePage);
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', screenshotBase64, duration: Date.now() - start };
       }
     }
 

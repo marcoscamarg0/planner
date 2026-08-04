@@ -60,30 +60,42 @@ async function executeStep(
   step: AutomationJobData['scriptSteps'][0],
   index: number,
   targetUrl: string,
-  job: Job<AutomationJobData>
+  job: Job<AutomationJobData>,
+  lastScreenshotHash: { value: string | undefined }
 ): Promise<StepResult> {
   const startTime = Date.now();
   let screenshotBase64: string | undefined;
   let screenshotElementBase64: string | undefined;
 
-  const takeScreenshot = async (): Promise<string | undefined> => {
+  // Simple hash (length + first 64 chars of base64) to detect duplicates
+  const hashOf = (b64: string) => `${b64.length}:${b64.substring(0, 64)}`;
+
+  const takeScreenshot = async (force = false): Promise<string | undefined> => {
     try {
       const pages = page.context().pages();
-      const activePage = pages[pages.length - 1]; // Aba mais recente (popup ou atual)
+      const activePage = pages[pages.length - 1]; // Most recent tab
       
-      // Força a espera do carregamento e do rendering do JS para sites lentos
       await activePage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-      await activePage.waitForTimeout(2500);
+      await activePage.waitForTimeout(1500); // Reduced from 2500ms
       
       const buf = await activePage.screenshot({ type: 'jpeg', quality: 70, timeout: 8000 });
-      
-      // Fecha abas extras abertas por target="_blank" para manter o contexto limpo
+      const b64 = buf.toString('base64');
+
+      // Close extra tabs opened via target="_blank"
       if (pages.length > 1) {
         for (let i = 1; i < pages.length; i++) {
           await pages[i].close().catch(() => {});
         }
       }
-      return buf.toString('base64');
+
+      // Deduplicate: skip if the page looks identical to the previous screenshot
+      const currentHash = hashOf(b64);
+      if (!force && lastScreenshotHash.value && currentHash === lastScreenshotHash.value) {
+        return undefined; // Same screen — don't repeat
+      }
+
+      lastScreenshotHash.value = currentHash;
+      return b64;
     } catch { return undefined; }
   };
 
@@ -93,7 +105,9 @@ async function executeStep(
       await job.log(`[Passo #${index}] Ação: GOTO -> ${step.value || targetUrl}`);
       await page.goto(step.value || targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await autoAcceptCookies(page);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(800);
+      // Always take a screenshot on goto (new page — force=true to bypass dedup)
+      screenshotBase64 = await takeScreenshot(true);
       
       return {
         index, label: step.label, status: 'aprovado',
@@ -105,6 +119,8 @@ async function executeStep(
     if (step.action === 'wait') {
       await job.log(`[Passo #${index}] Ação: WAIT -> ${step.milliseconds || 1000}ms`);
       await page.waitForTimeout(step.milliseconds || 1000);
+      // Waits: take screenshot but deduplicate (may be same page)
+      screenshotBase64 = await takeScreenshot();
       
       return {
         index, label: step.label, status: 'aprovado',
@@ -116,6 +132,8 @@ async function executeStep(
       await job.log(`[Passo #${index}] Ação: SCROLL`);
       await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.7));
       await page.waitForTimeout(800);
+      // Scroll: take screenshot — new content should be visible
+      screenshotBase64 = await takeScreenshot();
       
       return {
         index, label: step.label, status: 'aprovado',
@@ -123,7 +141,7 @@ async function executeStep(
       };
     }
 
-    // Construir locator
+    // Build locator
     switch (step.selectorType) {
       case 'role':
         locator = page.getByRole(step.selector as any, step.value ? { name: step.value } : {});
@@ -144,17 +162,14 @@ async function executeStep(
         locator = page.locator(step.selector || '*');
     }
 
-    locator = locator.first(); // Evitar erros de Strict Mode
+    locator = locator.first();
 
     await job.log(`[Passo #${index}] Localizando: tipo='${step.selectorType}', seletor='${step.selector}', valor='${step.value}'`);
 
-    // Tentar aceitar cookies caso haja banner bloqueando a tela
     await autoAcceptCookies(page);
-
-    // Scroll para o elemento
     await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
 
-    // Highlight visual temporário
+    // Temporary visual highlight
     const originalStyle = await locator.evaluate((el: HTMLElement) => {
       const old = { shadow: el.style.boxShadow, outline: el.style.outline, border: el.style.border, transition: el.style.transition };
       el.style.transition = 'none';
@@ -166,13 +181,13 @@ async function executeStep(
 
     await page.waitForTimeout(400);
 
-    // Evidência pequena do elemento antes do clique/ação
+    // Element close-up screenshot (before action)
     if (step.action === 'click' || !step.action) {
       const buf = await locator.screenshot({ type: 'jpeg', quality: 80, timeout: 5000 }).catch(() => null);
       if (buf) screenshotElementBase64 = buf.toString('base64');
     }
 
-    // Remover highlight
+    // Remove highlight
     if (originalStyle) {
       await locator.evaluate((el: HTMLElement, old: any) => {
         el.style.transition = old.transition || '';
@@ -183,7 +198,7 @@ async function executeStep(
 
     await job.log(`[Passo #${index}] Executando ação: ${step.action}`);
 
-    // Executar ação
+    // Execute action
     if (step.action === 'type') {
       await locator.fill(step.value || '', { timeout: 8000 });
       await page.waitForTimeout(500);
@@ -197,7 +212,7 @@ async function executeStep(
       await locator.hover({ timeout: 8000 });
       await page.waitForTimeout(600);
     } else {
-      // click (padrão)
+      // click (default)
       if (step.isPopup) {
         const popupPromise = page.waitForEvent('popup', { timeout: 8000 }).catch(() => null);
         await locator.click({ force: true, timeout: 5000 });
@@ -205,17 +220,15 @@ async function executeStep(
       } else {
         await locator.click({ force: true, timeout: 5000 });
       }
-      // Aguardar a página reagir
+      // Wait for page to react
       await Promise.race([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {}),
         page.waitForTimeout(1500),
       ]);
     }
 
-    // Evidência de tela cheia APENAS após clique, conforme solicitado
-    if (step.action === 'click' || !step.action) {
-      screenshotBase64 = await takeScreenshot();
-    }
+    // Full-page screenshot after every action — deduplicated
+    screenshotBase64 = await takeScreenshot();
 
     const activeUrl = page.context().pages().slice(-1)[0].url();
     let detalhe = step.action === 'type'
@@ -228,8 +241,6 @@ async function executeStep(
       detalhe += ` ➡️ Nova página: ${activeUrl}`;
     }
 
-    // Removido o retorno forçado à URL inicial, para permitir que o fluxo progrida por múltiplas páginas
-
     return {
       index, label: step.label, status: 'aprovado',
       detalhe, screenshotBase64, screenshotElementBase64, duration: Date.now() - startTime,
@@ -238,9 +249,9 @@ async function executeStep(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message.split('\n')[0] : String(err);
     await job.log(`[Passo #${index}] ❌ FALHA: ${msg.substring(0, 200)}`);
-    screenshotBase64 = await takeScreenshot().catch(() => undefined);
+    screenshotBase64 = await takeScreenshot(true).catch(() => undefined);
 
-    // Retornar à URL base após erro
+    // Return to base URL after error
     try {
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
     } catch { /* ignore */ }
@@ -252,6 +263,7 @@ async function executeStep(
     };
   }
 }
+
 
 
 export async function executeAutomation(
@@ -301,8 +313,9 @@ export async function executeAutomation(
     await job.log(`[Executor] ♿ Axe: ${axeViolations.length} violações de acessibilidade/WCAG encontradas.`);
     console.log(`[Executor] ♿ Axe: ${axeViolations.length} violações encontradas`);
 
-    // Executar passos
+    // Execute steps
     const totalSteps = scriptSteps.length;
+    const lastScreenshotHash: { value: string | undefined } = { value: undefined };
     for (let i = 0; i < totalSteps; i++) {
       const step = scriptSteps[i];
       const progress = 14 + Math.floor(((i + 1) / totalSteps) * 72);
@@ -311,7 +324,7 @@ export async function executeAutomation(
       const msg = `[Executor] Passo ${i + 1}/${totalSteps}: ${step.label}`;
       await job.log(msg);
       console.log(msg);
-      const result = await executeStep(page, step, i + 1, targetUrl, job);
+      const result = await executeStep(page, step, i + 1, targetUrl, job, lastScreenshotHash);
       results.push(result);
     }
 

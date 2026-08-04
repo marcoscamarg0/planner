@@ -54,12 +54,19 @@ export default async function ReportPage({ params }: Props) {
     .select("id, title, created_at, updated_at")
     .eq("project_id", id);
 
+  const { data: qaReports } = await supabase
+    .from("qa_reports")
+    .select("id, type, title, created_at, result_json, model_used")
+    .eq("project_id", id)
+    .order("created_at", { ascending: false });
+
   return (
     <ReportClient
       project={project}
       tasks={tasks ?? []}
       insights={insights ?? []}
       pages={pages ?? []}
+      qaReports={qaReports ?? []}
     />
   );
 }

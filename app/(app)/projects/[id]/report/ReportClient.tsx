@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowLeft, CheckSquare, FileText, TrendingUp } from "lucide-react";
+import { ArrowLeft, CheckSquare, FileText, TrendingUp, TestTube2, CheckCircle2, ShieldAlert } from "lucide-react";
 import { ProgressChart } from "@/components/dashboard/ProgressChart";
 import { InsightBadge } from "@/components/dashboard/InsightBadge";
 import { getProgressColor, getStatusLabel, formatRelativeDate } from "@/lib/utils";
@@ -13,9 +13,10 @@ interface ReportClientProps {
   tasks: Task[];
   insights: AiInsight[];
   pages: Pick<Page, "id" | "title" | "created_at" | "updated_at">[];
+  qaReports?: any[];
 }
 
-export function ReportClient({ project, tasks, insights, pages }: ReportClientProps) {
+export function ReportClient({ project, tasks, insights, pages, qaReports = [] }: ReportClientProps) {
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter((t) => t.status === "done").length;
   const inProgressTasks = tasks.filter((t) => t.status === "in_progress").length;
@@ -219,6 +220,51 @@ export function ReportClient({ project, tasks, insights, pages }: ReportClientPr
                 </li>
               ))}
             </ul>
+          </div>
+        </motion.section>
+      )}
+
+      {qaReports && qaReports.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          aria-label="Relatórios de Qualidade"
+        >
+          <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+            <TestTube2 className="w-4 h-4 text-primary" />
+            Qualidade & Testes ({qaReports.length})
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {qaReports.map((rep) => {
+              const isTestCase = rep.type === "test_cases";
+              const isBug = rep.type === "bug_report";
+              return (
+                <div key={rep.id} className="glass p-4 rounded-xl space-y-2 border border-border/50">
+                  <div className="flex items-start justify-between">
+                    <span className={`px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider ${
+                      isTestCase ? 'bg-sky-500/10 text-sky-400' : 
+                      isBug ? 'bg-rose-500/10 text-rose-400' : 'bg-primary/10 text-primary'
+                    }`}>
+                      {rep.type.replace('_', ' ')}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{formatRelativeDate(rep.created_at)}</span>
+                  </div>
+                  <h3 className="font-medium text-sm line-clamp-1">{rep.title}</h3>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
+                    {rep.model_used && (
+                      <span className="bg-accent px-2 py-0.5 rounded-full">{rep.model_used}</span>
+                    )}
+                    {rep.result_json?.test_cases && (
+                      <span className="flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        {rep.result_json.test_cases.length} casos
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </motion.section>
       )}

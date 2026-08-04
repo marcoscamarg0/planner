@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   FlaskConical,
   FileText,
@@ -42,6 +43,9 @@ import {
   SlidersHorizontal,
   ArrowUpDown,
   Filter,
+  GitBranch,
+  ExternalLink,
+  FileImage,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
@@ -231,9 +235,12 @@ const REPORT_TYPES: Array<{
 ];
 
 
-interface QaClientProps { projects: Project[]; }
+interface QaClientProps { projectId: string; }
 
-export function QaClient({ projects }: QaClientProps) {
+export function QaClient({ projectId }: QaClientProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [activeTab, setActiveTab] = useState<ToolTab>("smart_runner");
   const [selectedReportType, setSelectedReportType] = useState<ReportSubType | null>(null);
   const [selectedModel, setSelectedModel] = useState("auto-free");
@@ -245,6 +252,7 @@ export function QaClient({ projects }: QaClientProps) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+
 
   // HTML file
   const [htmlFile, setHtmlFile] = useState<File | null>(null);
@@ -287,6 +295,12 @@ export function QaClient({ projects }: QaClientProps) {
   const [activeEvidenceTcId, setActiveEvidenceTcId] = useState<string | null>(null);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
 
+  // Save to project
+  const [savingToProject, setSavingToProject] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveTargetProjectId, setSaveTargetProjectId] = useState<string>("");
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
   const loadPdfJs = (): Promise<any> => {
     return new Promise((resolve, reject) => {
       if ((window as any).pdfjsLib) {
@@ -316,6 +330,8 @@ export function QaClient({ projects }: QaClientProps) {
     try {
       // 1. Fetch text from backend (highly reliable, no render/worker crashes)
       const formData = new FormData();
+      if (htmlFile) formData.append("html_file", htmlFile);
+      formData.append("project_id", projectId);
       formData.append("pdf_file", file);
       const textPromise = fetch("/api/ai/parse-pdf", {
         method: "POST",
@@ -392,9 +408,10 @@ export function QaClient({ projects }: QaClientProps) {
   const currentModel = MODELS.find(m => m.key === selectedModel) || MODELS[0];
 
   const loadReports = useCallback(async () => {
+    if (!projectId) return;
     setLoadingReports(true);
     try {
-      const res = await fetch("/api/ai/qa");
+      const res = await fetch(`/api/ai/qa?projectId=${projectId}`);
       if (res.ok) {
         const data = await res.json();
         setReports(data.reports || []);
@@ -650,6 +667,7 @@ export function QaClient({ projects }: QaClientProps) {
           input: input.trim(),
           framework: selectedFramework,
           model: selectedModel,
+          project_id: projectId,
         }),
       });
 
@@ -692,7 +710,7 @@ export function QaClient({ projects }: QaClientProps) {
       const res = await fetch("/api/ai/qa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool_type: "consolidated_report", input: "", model: selectedModel }),
+        body: JSON.stringify({ tool_type: "consolidated_report", input: "", model: selectedModel, project_id: projectId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha");
@@ -755,6 +773,108 @@ export function QaClient({ projects }: QaClientProps) {
       md += "\n**Resultado Esperado:** " + tc.expected_result + "\n\n---\n\n";
     });
     downloadResult(md, "md", "casos-de-teste");
+  };
+
+  const generateTestCasesPDF = () => {
+    if (!testCases) return;
+    const categoryColor: Record<string, string> = {
+      happy_path: "#10b981",
+      error: "#f43f5e",
+      edge_case: "#f59e0b",
+    };
+    const priorityColor: Record<string, string> = {
+      alta: "#f43f5e",
+      media: "#f59e0b",
+      baixa: "#10b981",
+    };
+    const rows = testCases.map(tc => {
+      const evidenceHtml = tc.evidence
+        ? `<div style="margin-top:12px"><p style="font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:6px">EVIDÊNCIA</p><img src="${tc.evidence}" style="max-width:100%;max-height:300px;border-radius:8px;border:1px solid #334155;display:block" /></div>`
+        : '';
+      return `
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:16px;page-break-inside:avoid">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+            <div>
+              <span style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.05em">${tc.id}</span>
+              <h2 style="font-size:15px;font-weight:700;color:#f1f5f9;margin:4px 0 0">${tc.title}</h2>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:${priorityColor[tc.priority] || '#94a3b8'}22;color:${priorityColor[tc.priority] || '#94a3b8'};border:1px solid ${priorityColor[tc.priority] || '#94a3b8'}44;text-transform:uppercase">${tc.priority}</span>
+              <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:${categoryColor[tc.category] || '#94a3b8'}22;color:${categoryColor[tc.category] || '#94a3b8'};border:1px solid ${categoryColor[tc.category] || '#94a3b8'}44">${CATEGORY_LABEL[tc.category] || tc.category}</span>
+            </div>
+          </div>
+          <div style="margin-bottom:12px">
+            <p style="font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:8px">PASSOS</p>
+            <ol style="margin:0;padding-left:0;list-style:none">
+              ${tc.steps.map((s, i) => `<li style="display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;font-size:13px;color:#e2e8f0"><span style="min-width:22px;height:22px;background:#6366f1;color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${i + 1}</span>${s}</li>`).join('')}
+            </ol>
+          </div>
+          <div style="border-top:1px solid #334155;padding-top:12px">
+            <p style="font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:4px">RESULTADO ESPERADO</p>
+            <p style="font-size:13px;color:#34d399;margin:0">${tc.expected_result}</p>
+          </div>
+          ${evidenceHtml}
+        </div>
+      `;
+    }).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Casos de Teste</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { background: #0f172a; font-family: 'Segoe UI', system-ui, sans-serif; padding: 32px; color: #f1f5f9; }
+          @media print { body { padding: 16px; } }
+        </style>
+      </head>
+      <body>
+        <div style="max-width:900px;margin:0 auto">
+          <div style="margin-bottom:32px;border-bottom:1px solid #334155;padding-bottom:16px">
+            <h1 style="font-size:24px;font-weight:800;color:#f1f5f9">Casos de Teste</h1>
+            <p style="font-size:13px;color:#94a3b8;margin-top:4px">${testCases.length} casos gerados por IA &bull; ${new Date().toLocaleDateString('pt-BR')}</p>
+          </div>
+          ${rows}
+        </div>
+        <script>window.onload=()=>{window.print();}<\/script>
+      </body>
+      </html>
+    `;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
+  const saveTestCasesToProject = async (projectId: string) => {
+    if (!testCases || !projectId) return;
+    setSavingToProject(true);
+    setSaveSuccess(false);
+    try {
+      const res = await fetch("/api/ai/qa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool_type: "test_cases",
+          input: `[Importado manualmente] ${testCases.length} casos de teste`,
+          model: selectedModel,
+          project_id: projectId,
+          // pass result directly to avoid re-generation
+          _prebuilt_result: JSON.stringify({ test_cases: testCases }),
+        }),
+      });
+      if (res.ok) {
+        setSaveSuccess(true);
+        setTimeout(() => { setShowSaveModal(false); setSaveSuccess(false); }, 1800);
+      } else {
+        const d = await res.json();
+        alert("Erro ao salvar: " + (d.error || "desconhecido"));
+      }
+    } catch (e: any) {
+      alert("Erro: " + e.message);
+    } finally {
+      setSavingToProject(false);
+    }
   };
 
   const tabs = [
@@ -1158,6 +1278,7 @@ export function QaClient({ projects }: QaClientProps) {
     batch_runner: "Adicione as URLs e especificações para a execução de testes em lote e geração de relatórios...",
   };
 
+  // No project selector needed as this component is always mounted inside a project context
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -1921,7 +2042,7 @@ export function QaClient({ projects }: QaClientProps) {
                     <h2 className="text-sm font-semibold text-foreground">{testCases.length} casos de teste gerados</h2>
                     <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Salvo automaticamente</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={() => downloadJSON(testCases, "casos-de-teste")}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
@@ -1937,6 +2058,29 @@ export function QaClient({ projects }: QaClientProps) {
                       Exportar .MD
                     </button>
                     <button
+                      onClick={generateTestCasesPDF}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all"
+                    >
+                      <FileImage className="w-3.5 h-3.5" />
+                      Exportar PDF
+                    </button>
+                    <button
+                      onClick={() => { setSaveTargetProjectId(projectId); setShowSaveModal(true); }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-sky-400 hover:text-sky-300 border border-sky-500/30 hover:border-sky-400/50 bg-sky-500/5 hover:bg-sky-500/10 transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Salvar no Projeto
+                    </button>
+                    {projectId && (
+                      <button
+                        onClick={() => router.push(`/projects/${projectId}?tab=flow`)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-400/50 bg-violet-500/5 hover:bg-violet-500/10 transition-all"
+                      >
+                        <GitBranch className="w-3.5 h-3.5" />
+                        Ver Fluxograma
+                      </button>
+                    )}
+                    <button
                       onClick={() => copyToClipboard(JSON.stringify(testCases, null, 2))}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
                     >
@@ -1945,6 +2089,76 @@ export function QaClient({ projects }: QaClientProps) {
                     </button>
                   </div>
                 </div>
+
+                {/* Save to Project Modal */}
+                <AnimatePresence>
+                  {showSaveModal && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                      onClick={() => setShowSaveModal(false)}
+                    >
+                      <motion.div
+                        initial={{ scale: 0.95, y: 20 }}
+                        animate={{ scale: 1, y: 0 }}
+                        exit={{ scale: 0.95, y: 20 }}
+                        className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div className="flex items-center gap-3 mb-5">
+                          <div className="w-9 h-9 rounded-xl bg-sky-500/10 flex items-center justify-center">
+                            <Download className="w-4 h-4 text-sky-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-foreground">Salvar no Projeto</h3>
+                            <p className="text-xs text-muted-foreground">{testCases?.length} casos de teste serão vinculados</p>
+                          </div>
+                          <button onClick={() => setShowSaveModal(false)} className="ml-auto p-1 text-muted-foreground hover:text-foreground transition-colors">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-xs font-medium text-muted-foreground">Selecione o projeto de destino</label>
+                          <select
+                            value={saveTargetProjectId}
+                            onChange={e => setSaveTargetProjectId(e.target.value)}
+                            className="w-full bg-background border border-border rounded-lg text-sm p-2.5 focus:outline-none focus:border-primary/50 transition-colors"
+                          >
+                            <option value="">Selecione um projeto...</option>
+                            {projects.map(p => (
+                              <option key={p.id} value={p.id}>{p.title}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="flex gap-3 mt-5">
+                          <button
+                            onClick={() => setShowSaveModal(false)}
+                            className="flex-1 px-4 py-2 rounded-lg text-sm border border-border hover:bg-accent transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={() => saveTestCasesToProject(saveTargetProjectId)}
+                            disabled={!saveTargetProjectId || savingToProject}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm bg-sky-500 text-white hover:bg-sky-400 transition-colors disabled:opacity-50 font-medium"
+                          >
+                            {savingToProject ? (
+                              <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</>
+                            ) : saveSuccess ? (
+                              <><Check className="w-4 h-4" /> Salvo!</>
+                            ) : (
+                              <><Download className="w-4 h-4" /> Salvar</>
+                            )}
+                          </button>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Hidden input for test case evidence upload */}
                 <input

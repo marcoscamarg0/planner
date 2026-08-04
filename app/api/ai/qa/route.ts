@@ -16,16 +16,20 @@ const AVAILABLE_MODELS: Record<string, string> = {
 
 async function callOpenRouter(messages: any[], modelKey: string, apiKey: string) {
   const model = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["auto-free"];
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
+
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
+    signal: controller.signal,
     headers: {
       "Authorization": "Bearer " + apiKey,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://planner-j53e.onrender.com",
       "X-Title": "Planner QA Suite",
     },
-    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 4000 }),
-  });
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 8000 }),
+  }).finally(() => clearTimeout(timeoutId));
 
   if (!response.ok) {
     const err = await response.text();
@@ -44,18 +48,26 @@ export async function GET(req: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { data, error } = await supabase
+    const url = new URL(req.url);
+    const projectId = url.searchParams.get("projectId");
+
+    let query = supabase
       .from("qa_reports")
-      .select("id, user_id, type, title, framework, model_used, input_description, result_json, created_at")
+      .select("id, user_id, project_id, type, title, framework, model_used, input_description, result_json, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
 
-    // Table might not exist yet — return empty list instead of 500
+    if (projectId) {
+      query = query.eq("project_id", projectId);
+    }
+    const { data, error } = await query;
+
+    // Table might not exist yet or column missing — return empty list gracefully
     if (error) {
-      if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
-        console.warn("[GET /api/ai/qa] Tabela qa_reports não encontrada. Execute a migration 007.");
-        return NextResponse.json({ reports: [], warning: "Tabela ainda não foi criada. Execute a migration 007_recreate_qa_reports.sql no Supabase." });
+      if (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.code === '42703') {
+        console.warn("[GET /api/ai/qa] Erro de schema ignorado (tabela ou coluna faltando):", error.message);
+        return NextResponse.json({ reports: [], warning: "Tabela ou coluna project_id ainda não criadas. Execute a migration 011_add_project_id_to_qa_reports.sql." });
       }
       throw error;
     }
@@ -100,7 +112,7 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const contentType = req.headers.get("content-type") || "";
-    let tool_type: string, input: string, framework: string, model: string, html_content: string = "";
+    let tool_type: string, input: string, framework: string, model: string, html_content: string = "", project_id: string = "";
 
     if (contentType.includes("multipart/form-data")) {
        const form = await req.formData();
@@ -108,6 +120,7 @@ export async function POST(req: Request) {
        input = form.get("input") as string || "";
        framework = form.get("framework") as string || "playwright";
        model = form.get("model") as string || "kimi-k2";
+       project_id = form.get("project_id") as string || "";
        const file = form.get("html_file") as File | null;
        if (file) {
          html_content = await file.text();
@@ -118,7 +131,28 @@ export async function POST(req: Request) {
        input = body.input;
        framework = body.framework || "playwright";
        model = body.model || "auto-free";
+       project_id = body.project_id || "";
        html_content = body.html_content || "";
+
+       // Short-circuit: if caller already has a result, save directly without calling AI
+       if (body._prebuilt_result && tool_type === "test_cases") {
+         const prebuilt = body._prebuilt_result;
+         let prebuiltJson: any = null;
+         try { prebuiltJson = JSON.parse(prebuilt); } catch {}
+         const { data: inserted, error: insertError } = await supabase.from("qa_reports").insert({
+           user_id: user.id,
+           project_id: project_id || null,
+           type: "test_cases",
+           title: "Casos de Teste (importados) — " + new Date().toLocaleDateString("pt-BR"),
+           input_description: input || "Casos importados manualmente",
+           framework: null,
+           model_used: model,
+           result_raw: prebuilt,
+           result_json: prebuiltJson,
+         }).select();
+         if (insertError) throw insertError;
+         return NextResponse.json({ success: true, report: inserted?.[0], result: prebuilt });
+       }
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -133,14 +167,75 @@ export async function POST(req: Request) {
       : "";
 
     if (tool_type === "test_cases") {
-      const sys = "Você é um engenheiro de QA sênior especialista em criação de casos de teste. "
-        + "Sua missão é gerar casos de teste completos, estruturados e profissionais. "
-        + "Se o usuário fornecer um código de automação de testes (Playwright, Cypress, Selenium, etc.), analise o código e extraia com precisão cada caso de teste implementado ou implícito nele. "
-        + "Retorne EXATAMENTE um JSON válido com o formato: "
+      // --- Detect and parse Playwright JSONL recording format ---
+      let processedInput = input;
+      const isPlaywrightJsonl = input.trim().startsWith('{"browserName"') || input.trim().startsWith('{"name":"openPage"') || (input.includes('"name":"click"') && input.includes('"name":"navigate"'));
+      if (isPlaywrightJsonl) {
+        try {
+          const lines = input.split('\n').filter(l => l.trim().startsWith('{'));
+          const actions: any[] = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+          const baseUrl = actions.find((a: any) => a.name === 'navigate' && a.pageAlias === 'page')?.url
+            || actions.find((a: any) => a.name === 'openPage' && a.url)?.url || '';
+
+          // Build journeys: each meaningful click on the main page starts a new journey
+          const journeys: { trigger: string; steps: string[]; destination: string }[] = [];
+          let currentJourney: { trigger: string; steps: string[]; destination: string } | null = null;
+
+          const describeAction = (a: any): string => {
+            const label = a.locator?.body || a.locator?.options?.name || a.selector || '';
+            if (a.name === 'navigate') return `Navega para: ${a.url}`;
+            if (a.name === 'click') return `Clica em "${label}"`;
+            if (a.name === 'fill' || a.name === 'type') return `Preenche "${label}" com "${a.value}"`;
+            if (a.name === 'closePage') return `Fecha aba`;
+            if (a.name === 'press') return `Pressiona "${a.key}"`;
+            if (a.name === 'scroll') return `Rola a página`;
+            if (a.name === 'check') return `Marca checkbox "${label}"`;
+            if (a.name === 'select') return `Seleciona "${a.value}" em "${label}"`;
+            return `${a.name}: ${label}`;
+          };
+
+          for (const a of actions) {
+            if (a.name === 'browserName' || a.name === 'openPage' && !a.url) continue;
+
+            // A click on the MAIN page that opens a new tab = start of a new journey
+            if (a.name === 'click' && a.pageAlias === 'page') {
+              if (currentJourney) journeys.push(currentJourney);
+              const label = a.locator?.body || a.locator?.options?.name || a.selector || 'elemento';
+              currentJourney = {
+                trigger: `Clica em "${label}"`,
+                steps: [`Acessar ${baseUrl}`, `Clica em "${label}"`],
+                destination: ''
+              };
+            } else if (a.name === 'navigate' && currentJourney) {
+              currentJourney.destination = a.url;
+              currentJourney.steps.push(`Navega para: ${a.url}`);
+            } else if (currentJourney && !['openPage', 'browserName'].includes(a.name)) {
+              currentJourney.steps.push(describeAction(a));
+            }
+          }
+          if (currentJourney) journeys.push(currentJourney);
+
+          // Format as numbered scenario list
+          const scenariosText = journeys.map((j, i) =>
+            `Cenário ${i + 1}: ${j.trigger}\n  URL de destino: ${j.destination || '(mesma página)'}\n  Passos: ${j.steps.slice(0, 8).join(' → ')}`
+          ).join('\n\n');
+
+          processedInput = `Site testado: ${baseUrl}\nTotal de cenários gravados: ${journeys.length}\n\n=== CENÁRIOS ===\n\n${scenariosText}`;
+        } catch (e) {
+          processedInput = input;
+        }
+      }
+      // -----------------------------------------------------------
+
+      const sys = "Você é um engenheiro de QA sênior. Para CADA cenário listado abaixo, gere exatamente 1 caso de teste. "
+        + "NÃO agrupe cenários diferentes. NÃO omita nenhum cenário. "
+        + "Retorne APENAS JSON válido no formato: "
         + '{"test_cases": [{"id": "TC001", "title": "...", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
 
-      const usr = "Gere casos de teste completos para a seguinte funcionalidade ou a partir do código de teste abaixo:\n\n" + input + htmlContext
-        + "\n\nSe for código de teste, mapeie os steps exatos realizados na automação e o resultado esperado. Cubra cenários de: Happy Path, Erros esperados e Casos de borda. Retorne apenas o JSON.";
+      const usr = `Crie 1 caso de teste para CADA um dos ${processedInput.match(/Cenário \d+:/g)?.length || 1} cenários abaixo. NÃO pule nenhum.\n\n`
+        + processedInput + htmlContext
+        + "\n\nRetorne apenas o JSON com TODOS os casos de teste, um por cenário.";
 
       result = await callOpenRouter(
         [{ role: "system", content: sys }, { role: "user", content: usr }],
@@ -153,8 +248,9 @@ export async function POST(req: Request) {
         reportJson = JSON.parse(jsonStr);
       } catch { reportJson = null; }
 
-      const { data: inserted } = await supabase.from("qa_reports").insert({
+      const { data: inserted, error: insertError } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "test_cases",
         title: "Casos de Teste — " + (input.slice(0, 60) + (input.length > 60 ? "..." : "")),
         input_description: input,
@@ -163,6 +259,7 @@ export async function POST(req: Request) {
         result_raw: result,
         result_json: reportJson,
       }).select();
+      if (insertError) throw insertError;
       createdReport = inserted?.[0];
 
     } else if (tool_type === "test_report") {
@@ -179,8 +276,9 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      const { data: inserted } = await supabase.from("qa_reports").insert({
+      const { data: inserted, error: insertError } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "test_report",
         title: "Relatório — " + (input.slice(0, 60) + (input.length > 60 ? "..." : "")),
         input_description: input,
@@ -189,6 +287,7 @@ export async function POST(req: Request) {
         result_raw: result,
         result_json: null,
       }).select();
+      if (insertError) throw insertError;
       createdReport = inserted?.[0];
 
     } else if (tool_type === "automation") {
@@ -218,8 +317,9 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      const { data: inserted } = await supabase.from("qa_reports").insert({
+      const { data: inserted, error: insertError } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "automation",
         title: "Automação " + fw.charAt(0).toUpperCase() + fw.slice(1) + " — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
         input_description: input,
@@ -228,6 +328,7 @@ export async function POST(req: Request) {
         result_raw: result,
         result_json: null,
       }).select();
+      if (insertError) throw insertError;
       createdReport = inserted?.[0];
 
     } else if (tool_type === "consolidated_report") {
@@ -268,8 +369,9 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      const { data: inserted } = await supabase.from("qa_reports").insert({
+      const { data: inserted, error: insertError } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "consolidated_report",
         title: "Relatório Executivo Consolidado — " + new Date().toLocaleDateString("pt-BR"),
         input_description: "Consolidado automático de " + reportsSummary.length + " relatórios",
@@ -278,6 +380,7 @@ export async function POST(req: Request) {
         result_raw: result,
         result_json: null,
       }).select();
+      if (insertError) throw insertError;
       createdReport = inserted?.[0];
 
     } else if (tool_type === "general_test_report") {
@@ -303,6 +406,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "general_test_report",
         title: "Relatório Geral de Testes — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
         input_description: input,
@@ -336,6 +440,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "ter",
         title: "Relatório de Execução (TER) — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
         input_description: input,
@@ -375,6 +480,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "bug_report",
         title: "Relatório de Bugs — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
         input_description: input,
@@ -409,6 +515,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "rtm",
         title: "Matriz de Rastreabilidade (RTM) — " + (input.slice(0, 45) + (input.length > 45 ? "..." : "")),
         input_description: input,
@@ -442,6 +549,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "smoke_test",
         title: "Relatório de Teste de Fumaça — " + (input.slice(0, 48) + (input.length > 48 ? "..." : "")),
         input_description: input,
@@ -481,6 +589,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "performance_report",
         title: "Relatório de Desempenho — " + (input.slice(0, 52) + (input.length > 52 ? "..." : "")),
         input_description: input,
@@ -520,6 +629,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "security_report",
         title: "Relatório de Segurança — " + (input.slice(0, 52) + (input.length > 52 ? "..." : "")),
         input_description: input,
@@ -555,6 +665,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "regression_report",
         title: "Relatório de Regressão — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
         input_description: input,
@@ -590,6 +701,7 @@ export async function POST(req: Request) {
 
       const { data: inserted } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "compliance_report",
         title: "Relatório de Conformidade — " + (input.slice(0, 48) + (input.length > 48 ? "..." : "")),
         input_description: input,
@@ -625,8 +737,9 @@ export async function POST(req: Request) {
         model, apiKey
       );
 
-      const { data: inserted } = await supabase.from("qa_reports").insert({
+      const { data: inserted, error: insertError } = await supabase.from("qa_reports").insert({
         user_id: user.id,
+        project_id: project_id || null,
         type: "uat_report",
         title: "Relatório de UAT — " + (input.slice(0, 55) + (input.length > 55 ? "..." : "")),
         input_description: input,
@@ -635,6 +748,7 @@ export async function POST(req: Request) {
         result_raw: result,
         result_json: null,
       }).select();
+      if (insertError) throw insertError;
       createdReport = inserted?.[0];
 
     } else {

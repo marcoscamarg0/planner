@@ -1245,12 +1245,15 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <div
+              role="button"
+              tabIndex={0}
               onClick={e => { e.stopPropagation(); loadHistory(); }}
-              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+              onKeyDown={e => e.key === 'Enter' && loadHistory()}
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded cursor-pointer"
             >
               <RefreshCw className={cn("w-3.5 h-3.5", loadingHistory && "animate-spin")} />
-            </button>
+            </div>
             <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", showHistory && "rotate-180")} />
           </div>
         </button>

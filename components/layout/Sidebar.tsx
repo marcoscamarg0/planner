@@ -42,11 +42,6 @@ const navItems = [
     icon: Calendar,
   },
   {
-    href: "/qa",
-    label: "Qualidade & Testes",
-    icon: TestTube2,
-  },
-  {
     href: "/organogram",
     label: "Mapas Mentais",
     icon: Network,
@@ -135,14 +130,29 @@ function ProjectNavItem({
         ) : (
           <div className="w-4 h-4" />
         )}
-        <Link href={`/projects/${project.id}`} className="flex items-center gap-2 flex-1 min-w-0">
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: project.color }}
-            aria-hidden="true"
-          />
-          <span className="truncate flex-1 text-xs">{project.title}</span>
-        </Link>
+        
+        {level === 0 && hasChildren ? (
+          <button 
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer"
+          >
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: project.color }}
+              aria-hidden="true"
+            />
+            <span className="truncate flex-1 text-xs">{project.title}</span>
+          </button>
+        ) : (
+          <Link href={`/projects/${project.id}`} className="flex items-center gap-2 flex-1 min-w-0">
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: project.color }}
+              aria-hidden="true"
+            />
+            <span className="truncate flex-1 text-xs">{project.title}</span>
+          </Link>
+        )}
       </div>
 
       <AnimatePresence>
