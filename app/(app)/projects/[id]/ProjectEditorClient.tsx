@@ -35,6 +35,7 @@ interface ProjectEditorClientProps {
   tasks: Task[];
   insights: AiInsight[];
   initialPage: Page | null;
+  currentUserId: string;
 }
 
 type Tab = "editor" | "tasks" | "flow" | "qa";
@@ -45,6 +46,7 @@ export function ProjectEditorClient({
   tasks: initialTasks,
   insights: initialInsights,
   initialPage,
+  currentUserId,
 }: ProjectEditorClientProps) {
   const [pages, setPages] = useState<Page[]>(initialPages);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);

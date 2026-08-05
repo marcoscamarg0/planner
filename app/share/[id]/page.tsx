@@ -27,7 +27,7 @@ const renderMarkdownSimple = (md: string) => {
   });
 };
 
-export default async function PublicReportSharePage({ params }: { params: { id: string } }) {
+export default async function PublicReportSharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createServiceClient();
   
