@@ -14,10 +14,20 @@ const AVAILABLE_MODELS: Record<string, string> = {
   "cohere-north": "cohere/north-mini-code:free",
 };
 
-async function callOpenRouter(messages: any[], modelKey: string, apiKey: string) {
-  const model = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["auto-free"];
+// Ordered fallback list: most capable first, all free
+const FALLBACK_MODELS = [
+  "qwen/qwen-2.5-coder-32b-instruct:free",
+  "google/gemini-2.0-flash-exp:free",
+  "openai/gpt-oss-20b:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "cohere/north-mini-code:free",
+  "poolside/laguna-xs-2.1:free",
+  "openrouter/free",
+];
+
+async function callSingleModel(messages: any[], model: string, apiKey: string, timeoutMs = 40000): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -33,11 +43,44 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error("OpenRouter error [" + response.status + "]: " + err);
+    const error: any = new Error("OpenRouter error [" + response.status + "]: " + err);
+    error.status = response.status;
+    throw error;
   }
 
   const data = await response.json();
   return data.choices[0]?.message?.content || "";
+}
+
+async function callOpenRouter(messages: any[], modelKey: string, apiKey: string): Promise<string> {
+  const requestedModel = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["auto-free"];
+
+  // Build fallback chain: requested model first, then all others
+  const chain = [requestedModel, ...FALLBACK_MODELS.filter(m => m !== requestedModel)];
+
+  let lastError: any;
+  for (const model of chain) {
+    try {
+      console.log(`[QA API] Trying model: ${model}`);
+      const result = await callSingleModel(messages, model, apiKey);
+      if (model !== requestedModel) {
+        console.log(`[QA API] Fallback succeeded with: ${model}`);
+      }
+      return result;
+    } catch (err: any) {
+      lastError = err;
+      const isRetryable = err.status === 429 || err.status === 408 || err.status >= 500 || (err.message && (err.message.includes("429") || err.message.includes("502") || err.message.includes("503")));
+      const isAbort = err.name === "AbortError";
+      if (isRetryable || isAbort) {
+        console.warn(`[QA API] Model ${model} failed (${isAbort ? "timeout" : "provider error " + err.status}), trying next fallback...`);
+        continue; // try next model
+      }
+      // For non-retryable errors (like 401 Unauthorized), don't retry different models
+      throw err;
+    }
+  }
+
+  throw lastError || new Error("All models failed or are rate-limited. Try again in a few seconds.");
 }
 
 export const dynamic = "force-dynamic";
@@ -264,7 +307,8 @@ export async function POST(req: Request) {
 
     } else if (tool_type === "test_report") {
       const sys = "Você é um líder de qualidade especialista em documentação de testes de software. "
-        + "Escreva relatórios de teste formais, claros e detalhados em Markdown.";
+        + "Escreva relatórios de teste formais, claros e detalhados em Markdown. "
+        + "IDIOMA OBRIGATÓRIO: Responda EXCLUSIVAMENTE em Português do Brasil (PT-BR).";
 
       const usr = "Crie um relatório de teste de software completo com base nos seguintes dados:\n\n"
         + input + htmlContext
@@ -305,7 +349,8 @@ export async function POST(req: Request) {
 
       const sys = "Você é um engenheiro de automação de testes sênior especializado em " + lang + ". "
         + "Gere scripts de teste automatizado profissionais, bem comentados e prontos para execução imediata." + htmlInstruction
-        + " Retorne APENAS o código, sem explicações extras fora do código.";
+        + " Retorne APENAS o código, sem explicações extras fora do código. "
+        + "IDIOMA OBRIGATÓRIO: Responda e documente o código EXCLUSIVAMENTE em Português do Brasil (PT-BR).";
 
       const usr = "Crie um script de automação de testes completo usando " + lang + " para:\n\n"
         + input + htmlContext
@@ -351,7 +396,8 @@ export async function POST(req: Request) {
 
       const sys = "Você é um gerente de qualidade sênior. Analise todos os relatórios de teste fornecidos e "
         + "crie um relatório executivo consolidado em Markdown profissional e formal. "
-        + "Identifique padrões, tendências, riscos e recomendações estratégicas.";
+        + "Identifique padrões, tendências, riscos e recomendações estratégicas. "
+        + "IDIOMA OBRIGATÓRIO: Responda EXCLUSIVAMENTE em Português do Brasil (PT-BR).";
 
       const usr = "Com base nos seguintes " + reportsSummary.length + " relatórios de QA gerados:\n\n"
         + JSON.stringify(reportsSummary, null, 2)
@@ -385,7 +431,8 @@ export async function POST(req: Request) {
 
     } else if (tool_type === "general_test_report") {
       const sys = "Você é um gerente de qualidade sênior especializado em documentação de testes de software. "
-        + "Gere um Relatório Geral de Testes completo, formal e profissional em Markdown, seguindo padrões IEEE 829 e ISO/IEC 29119.";
+        + "Gere um Relatório Geral de Testes completo, formal e profissional em Markdown, seguindo padrões IEEE 829 e ISO/IEC 29119. "
+        + "IDIOMA OBRIGATÓRIO: Responda EXCLUSIVAMENTE em Português do Brasil (PT-BR).";
 
       const usr = "Crie um Relatório Geral de Testes completo com base nos seguintes dados:\n\n"
         + input + htmlContext

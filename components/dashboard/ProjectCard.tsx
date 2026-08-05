@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { MoreHorizontal, BarChart2, FileText, CheckSquare, Edit2, Trash2, Archive, Play, Pause } from "lucide-react";
+import { MoreHorizontal, BarChart2, FileText, CheckSquare, Edit2, Trash2, Archive, Play, Pause, Share2 } from "lucide-react";
 import { cn, getProgressColor, getStatusLabel } from "@/lib/utils";
 import { InsightBadge } from "./InsightBadge";
 import type { ProjectWithStats, ProjectStatus } from "@/types";
@@ -10,13 +10,17 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
+import { useState } from "react";
+import { ShareProjectModal } from "./ShareProjectModal";
+
 interface ProjectCardProps {
   project: ProjectWithStats;
   subProjects?: ProjectWithStats[];
   index?: number;
+  currentUserId?: string;
 }
 
-export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCardProps) {
+export function ProjectCard({ project, subProjects = [], index = 0, currentUserId }: ProjectCardProps) {
   const progressRate =
     project.total_tasks > 0
       ? Math.round((project.completed_tasks / project.total_tasks) * 100)
@@ -25,6 +29,7 @@ export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCar
   const progressColor = getProgressColor(progressRate);
   const router = useRouter();
   const supabase = createClient();
+  const [shareOpen, setShareOpen] = useState(false);
 
   const handleStatusChange = async (newStatus: ProjectStatus) => {
     await supabase.from("projects").update({ status: newStatus }).eq("id", project.id);
@@ -68,13 +73,13 @@ export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCar
             >
               {project.emoji ?? "📁"}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex items-center gap-2 flex-wrap">
               <h2 className="font-semibold text-foreground text-sm truncate">
                 {project.title}
               </h2>
               <span
                 className={cn(
-                  "text-xs font-medium px-2 py-0.5 rounded-full",
+                  "text-xs font-medium px-2 py-0.5 rounded-full shrink-0",
                   project.status === "active" && "bg-emerald-500/15 text-emerald-400",
                   project.status === "paused" && "bg-amber-500/15 text-amber-400",
                   project.status === "completed" && "bg-primary/15 text-primary",
@@ -83,6 +88,11 @@ export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCar
               >
                 {getStatusLabel(project.status)}
               </span>
+              {currentUserId && currentUserId !== project.owner_id && (
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0 bg-blue-500/15 text-blue-400">
+                  Compartilhado
+                </span>
+              )}
             </div>
           </div>
           <DropdownMenu.Root>
@@ -102,6 +112,18 @@ export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCar
                 className="w-48 bg-card border border-border rounded-xl shadow-xl p-1 z-50 text-sm overflow-hidden animate-in fade-in zoom-in-95"
                 onClick={(e) => e.stopPropagation()}
               >
+                {currentUserId === project.owner_id && (
+                  <>
+                    <DropdownMenu.Item
+                      onSelect={(e) => { e.preventDefault(); setShareOpen(true); }}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg outline-none cursor-pointer hover:bg-accent focus:bg-accent text-foreground transition-colors"
+                    >
+                      <Share2 className="w-4 h-4 text-muted-foreground" />
+                      Compartilhar
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="h-px bg-border my-1" />
+                  </>
+                )}
                 <DropdownMenu.Item
                   onSelect={handleEdit}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg outline-none cursor-pointer hover:bg-accent focus:bg-accent text-foreground transition-colors"
@@ -238,6 +260,12 @@ export function ProjectCard({ project, subProjects = [], index = 0 }: ProjectCar
           </div>
         </div>
       )}
+      
+      <ShareProjectModal 
+        isOpen={shareOpen} 
+        onClose={() => setShareOpen(false)} 
+        project={project} 
+      />
     </motion.article>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2 } from "lucide-react";
+import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2, Play } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn, getPriorityColor, getPriorityLabel, getStatusLabel, formatDate } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { TaskDetailPane } from "./TaskDetailPane";
 interface TaskPanelProps {
   tasks: Task[];
   projectId: string;
+  projectUrl?: string;
   onTasksChange: (tasks: Task[]) => void;
 }
 
@@ -29,7 +30,7 @@ const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   cancelled: "todo",
 };
 
-export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
+export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -41,11 +42,174 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "all">("all");
   const [subtaskFormId, setSubtaskFormId] = useState<string | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<TaskStatus | "">("");
+  const [bulkPriority, setBulkPriority] = useState<TaskPriority | "">("");
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, title: "" });
+
+  const executeBulkAutomation = async () => {
+    const ids = Array.from(selectedTasks);
+    if (ids.length === 0) return;
+    
+    const tasksToRun = ids.map(id => tasks.find(t => t.id === id)).filter(t => t && t.metadata?.automationCode);
+    if (tasksToRun.length === 0) {
+      alert("Nenhuma das tarefas selecionadas possui código de automação gerado. Gere a automação clicando em 'ABRIR' primeiro.");
+      return;
+    }
+
+    const targetUrl = prompt("Qual a URL alvo para executar as automações?", projectUrl || "http://localhost:3000");
+    if (!targetUrl) return;
+
+    setIsBatchRunning(true);
+    let current = 0;
+    const total = tasksToRun.length;
+
+    const supabase = createClient();
+    let updatedTasks = [...tasks];
+
+    for (const task of tasksToRun) {
+      if (!task) continue;
+      current++;
+      setBatchProgress({ current, total, title: task.title });
+      
+      const rawCode = task.metadata?.automationCode || "";
+      const codeMatch = rawCode.match(/```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)\s*```/);
+      const code = codeMatch ? codeMatch[1] : rawCode;
+
+      try {
+        if (task.status !== "in_progress") {
+          updatedTasks = updatedTasks.map(t => t.id === task.id ? { ...t, status: "in_progress" } : t);
+          onTasksChange(updatedTasks);
+          await supabase.from("tasks").update({ status: "in_progress", updated_at: new Date().toISOString() }).eq("id", task.id);
+        }
+
+        const res = await fetch("/api/automation/smart-run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUrl,
+            flowDescription: code,
+            jobName: task.title,
+            model: "auto-free",
+            includeAxe: false
+          })
+        });
+
+        let finalResult: any = null;
+        if (res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const parsed = JSON.parse(line.startsWith("data: ") ? line.slice(6) : line);
+                if (parsed.type === "result" || parsed.type === "end") {
+                  finalResult = parsed.data || parsed.result;
+                }
+              } catch (e) {}
+            }
+          }
+        }
+        
+        const passed = finalResult?.success === true;
+        const nextStatus = passed ? "done" : "in_progress";
+        const newMetadata = { ...(task.metadata || {}), lastRunResult: finalResult };
+        if (passed) delete newMetadata.automationCode;
+        
+        updatedTasks = updatedTasks.map(t => t.id === task.id ? { ...t, status: nextStatus, metadata: newMetadata } : t);
+        onTasksChange(updatedTasks);
+        await supabase.from("tasks").update({ status: nextStatus, metadata: newMetadata, updated_at: new Date().toISOString() }).eq("id", task.id);
+      } catch (e) {
+        // Ignora e continua
+      }
+    }
+    
+    setIsBatchRunning(false);
+    setBatchProgress({ current: 0, total: 0, title: "" });
+    setSelectedTasks(new Set());
+  };
 
   const filteredTasks =
     filterStatus === "all"
       ? tasks
       : tasks.filter((t) => t.status === filterStatus);
+
+  const toggleTaskSelection = (taskId: string) => {
+    const newSet = new Set(selectedTasks);
+    if (newSet.has(taskId)) newSet.delete(taskId);
+    else newSet.add(taskId);
+    setSelectedTasks(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedTasks.size === filteredTasks.length && filteredTasks.length > 0) {
+      setSelectedTasks(new Set());
+    } else {
+      setSelectedTasks(new Set(filteredTasks.map(t => t.id)));
+    }
+  };
+
+  const deleteSelectedTasks = async () => {
+    if (!confirm(`Tem certeza que deseja apagar ${selectedTasks.size} tarefas?`)) return;
+    const supabase = createClient();
+    const ids = Array.from(selectedTasks);
+    await supabase.from("tasks").delete().in("id", ids);
+    onTasksChange(tasks.filter(t => !selectedTasks.has(t.id) && (!t.parent_task_id || !selectedTasks.has(t.parent_task_id))));
+    setSelectedTasks(new Set());
+  };
+
+  const applyBulkEdit = async () => {
+    const supabase = createClient();
+    const updates: Partial<Task> = { updated_at: new Date().toISOString() };
+    if (bulkStatus) updates.status = bulkStatus as TaskStatus;
+    if (bulkPriority) updates.priority = bulkPriority as TaskPriority;
+    
+    if (Object.keys(updates).length > 1) {
+      const ids = Array.from(selectedTasks);
+      
+      const newTasks = tasks.map(t => {
+        if (selectedTasks.has(t.id)) {
+          let updatedTask = { ...t, ...updates };
+          if (bulkStatus === "done" && updatedTask.metadata?.automationCode) {
+            const metadata = { ...updatedTask.metadata };
+            delete metadata.automationCode;
+            updatedTask.metadata = metadata;
+          }
+          return updatedTask;
+        }
+        return t;
+      });
+
+      // Se for "done", vamos precisar atualizar a metadata das tasks no banco
+      if (bulkStatus === "done") {
+        for (const t of newTasks.filter(nt => selectedTasks.has(nt.id))) {
+          await supabase.from("tasks").update({ 
+            status: "done", 
+            metadata: t.metadata, 
+            updated_at: updates.updated_at 
+          }).eq("id", t.id);
+        }
+      } else {
+        await supabase.from("tasks").update(updates).in("id", ids);
+      }
+
+      onTasksChange(newTasks);
+    }
+    
+    setShowBulkEdit(false);
+    setSelectedTasks(new Set());
+    setBulkStatus("");
+    setBulkPriority("");
+  };
 
 
 
@@ -101,13 +265,20 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
   const cycleStatus = async (task: Task) => {
     const nextStatus = STATUS_CYCLE[task.status];
     const supabase = createClient();
+
+    let metadata = task.metadata;
+    if (nextStatus === "done" && metadata?.automationCode) {
+      metadata = { ...metadata };
+      delete metadata.automationCode;
+    }
+
     await supabase
       .from("tasks")
-      .update({ status: nextStatus, updated_at: new Date().toISOString() })
+      .update({ status: nextStatus, updated_at: new Date().toISOString(), metadata })
       .eq("id", task.id);
 
     onTasksChange(
-      tasks.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t))
+      tasks.map((t) => (t.id === task.id ? { ...t, status: nextStatus, metadata } : t))
     );
   };
 
@@ -159,12 +330,24 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
     <div className="flex flex-col h-full overflow-hidden relative">
       <TaskDetailPane
         taskId={activeTaskId}
+        onClose={() => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("taskId");
+          router.replace(`${pathname}?${params.toString()}`);
+        }}
         tasks={tasks}
         onTasksChange={onTasksChange}
-        onClose={() => router.push(pathname)}
+        projectUrl={projectUrl}
       />
       <div className="px-6 py-4 border-b border-border flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-1 flex-wrap">
+          <button
+            onClick={toggleSelectAll}
+            className="w-6 h-6 rounded flex items-center justify-center mr-2 border border-border bg-background hover:bg-accent transition-colors"
+            title={selectedTasks.size === filteredTasks.length && filteredTasks.length > 0 ? "Desmarcar todas" : "Selecionar todas"}
+          >
+            {selectedTasks.size === filteredTasks.length && filteredTasks.length > 0 ? <CheckSquare className="w-3.5 h-3.5 text-primary" /> : <Circle className="w-3.5 h-3.5 text-muted-foreground" />}
+          </button>
           {statusFilters.map((s) => (
             <button
               key={s}
@@ -189,6 +372,106 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
           Nova tarefa
         </button>
       </div>
+
+      <AnimatePresence>
+        {selectedTasks.size > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-accent/50 border-b border-border px-6 py-3 flex items-center justify-between gap-4 overflow-hidden"
+          >
+            <span className="text-xs font-semibold text-foreground">
+              {selectedTasks.size} selecionadas
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={executeBulkAutomation}
+                disabled={isBatchRunning}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 transition-all disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isBatchRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                Executar
+              </button>
+              <button
+                onClick={() => setShowBulkEdit(!showBulkEdit)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-background border border-border hover:bg-accent text-foreground transition-all"
+              >
+                Editar
+              </button>
+              <button
+                onClick={deleteSelectedTasks}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-all"
+              >
+                Apagar
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      <AnimatePresence>
+        {showBulkEdit && selectedTasks.size > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-card border-b border-border px-6 py-4 flex flex-col gap-3 overflow-hidden"
+          >
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground">Mudar Status para:</span>
+                <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value as TaskStatus)} className="bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground">
+                  <option value="">Manter atual</option>
+                  <option value="todo">A fazer</option>
+                  <option value="in_progress">Em progresso</option>
+                  <option value="done">Concluída</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground">Mudar Prioridade para:</span>
+                <select value={bulkPriority} onChange={e => setBulkPriority(e.target.value as TaskPriority)} className="bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground">
+                  <option value="">Manter atual</option>
+                  <option value="low">Baixa</option>
+                  <option value="medium">Média</option>
+                  <option value="high">Alta</option>
+                  <option value="urgent">Urgente</option>
+                </select>
+              </div>
+              <button
+                onClick={applyBulkEdit}
+                disabled={!bulkStatus && !bulkPriority}
+                className="mt-auto px-4 py-1.5 rounded bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 disabled:opacity-50"
+              >
+                Aplicar Alterações
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isBatchRunning && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-primary/5 border-b border-primary/20 px-6 py-3 overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-primary flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Executando: {batchProgress.title}
+              </span>
+              <span className="text-xs font-bold text-primary">{batchProgress.current} / {batchProgress.total}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-border overflow-hidden">
+              <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
         <AnimatePresence>
@@ -248,6 +531,12 @@ export function TaskPanel({ tasks, projectId, onTasksChange }: TaskPanelProps) {
                   )}
                 >
                   <div className="flex items-start gap-3 w-full z-10">
+                    <button
+                      onClick={() => toggleTaskSelection(task.id)}
+                      className="mt-0.5 shrink-0 flex items-center justify-center transition-colors text-muted-foreground hover:text-primary"
+                    >
+                      {selectedTasks.has(task.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Circle className="w-4 h-4" />}
+                    </button>
                     <button
                       onClick={() => cycleStatus(task)}
                       aria-label={`Status: ${getStatusLabel(task.status)}. Clique para avançar.`}

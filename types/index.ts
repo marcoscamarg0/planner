@@ -23,6 +23,7 @@ export interface Project {
   status: ProjectStatus;
   color: string;
   emoji: string | null;
+  target_url?: string | null;
   flow_data?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -52,6 +53,7 @@ export interface Task {
   due_date: string | null;
   assignee_id: string | null;
   parent_task_id: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }

@@ -46,8 +46,12 @@ import {
   GitBranch,
   ExternalLink,
   FileImage,
+  Plus,
+  CheckSquare,
+  Play,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
 import { BatchRunnerTab } from "@/components/qa/BatchRunnerTab";
 
@@ -235,13 +239,23 @@ const REPORT_TYPES: Array<{
 ];
 
 
-interface QaClientProps { projectId: string; }
+interface QaClientProps { 
+  projectId: string; 
+  externalTab?: ToolTab;
+  projectUrl?: string;
+}
 
-export function QaClient({ projectId }: QaClientProps) {
+export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<ToolTab>("smart_runner");
+  const [activeTab, setActiveTab] = useState<ToolTab>(externalTab || "smart_runner");
+
+  useEffect(() => {
+    if (externalTab && externalTab !== activeTab) {
+      setActiveTab(externalTab);
+    }
+  }, [externalTab]);
   const [selectedReportType, setSelectedReportType] = useState<ReportSubType | null>(null);
   const [selectedModel, setSelectedModel] = useState("auto-free");
   const [selectedFramework, setSelectedFramework] = useState("playwright");
@@ -249,6 +263,7 @@ export function QaClient({ projectId }: QaClientProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [testCases, setTestCases] = useState<TestCase[] | null>(null);
+  const [selectedTestCaseIds, setSelectedTestCaseIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
@@ -281,6 +296,21 @@ export function QaClient({ projectId }: QaClientProps) {
   const [exportingReportIds, setExportingReportIds] = useState<string[] | null>(null);
   const [selectedExportProjectId, setSelectedExportProjectId] = useState<string>("");
   const [isManagingReports, setIsManagingReports] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+
+  // Per-test-case execution status: "idle" | "pass" | "fail" | "blocked"
+  const [tcStatus, setTcStatus] = useState<Record<string, "idle" | "pass" | "fail" | "blocked">>({});
+  
+  // Batch Runner state
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentTitle: "" });
+
+  // Simplify Report state
+  const [simplifying, setSimplifying] = useState(false);
+  const [showFlowModal, setShowFlowModal] = useState(false);
+  const [savingFlow, setSavingFlow] = useState(false);
+  const [saveFlowSuccess, setSaveFlowSuccess] = useState(false);
 
   // History Filters
   const [historySearch, setHistorySearch] = useState("");
@@ -504,6 +534,29 @@ export function QaClient({ projectId }: QaClientProps) {
     if (showHistory) loadReports();
   }, [showHistory, loadReports]);
 
+  // Fetch projects when export modal or save modal opens
+  const fetchProjects = useCallback(async () => {
+    if (projects.length > 0) return;
+    setLoadingProjects(true);
+    try {
+      const res = await fetch("/api/projects");
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data.projects || []);
+      }
+    } catch { /* silent */ } finally {
+      setLoadingProjects(false);
+    }
+  }, [projects.length]);
+
+  useEffect(() => {
+    if (exportingReportIds) fetchProjects();
+  }, [exportingReportIds]);
+
+  useEffect(() => {
+    if (showSaveModal) fetchProjects();
+  }, [showSaveModal]);
+
   // Compute unique models found in reports for filter chips
   const reportModels = useMemo(() => {
     const models = new Set(reports.map(r => r.model_used).filter(Boolean));
@@ -651,6 +704,111 @@ export function QaClient({ projectId }: QaClientProps) {
     }
   };
 
+  const runSelectedTestCases = async () => {
+    if (!testCases || selectedTestCaseIds.size === 0) return;
+    const targetUrl = prompt("Qual a URL alvo para executar os testes?", projectUrl || "http://localhost:3000");
+    if (!targetUrl) return;
+
+    setIsBatchRunning(true);
+    const idsToRun = Array.from(selectedTestCaseIds);
+    let current = 0;
+    const total = idsToRun.length;
+
+    for (const tcId of idsToRun) {
+      current++;
+      const tc = testCases.find(t => t.id === tcId);
+      if (!tc) continue;
+
+      setBatchProgress({ current, total, currentTitle: tc.title });
+      
+      try {
+        const flowDesc = tc.steps.join("\n");
+        const res = await fetch("/api/automation/smart-run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUrl,
+            flowDescription: flowDesc,
+            jobName: tc.title,
+            model: "auto-free",
+            includeAxe: false
+          })
+        });
+
+        if (!res.body) throw new Error("Sem resposta do servidor");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let done = false;
+        let finalResult: any = null;
+
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: !done });
+            const lines = chunk.split("\n");
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.type === "end") finalResult = data.result;
+                  if (data.type === "error") throw new Error(data.message);
+                } catch (e) {}
+              }
+            }
+          }
+        }
+        
+        const passed = finalResult?.success === true;
+        setTcStatus(prev => ({ ...prev, [tc.id]: passed ? "pass" : "fail" }));
+      } catch (e) {
+        setTcStatus(prev => ({ ...prev, [tc.id]: "fail" }));
+      }
+    }
+    
+    setIsBatchRunning(false);
+    setBatchProgress({ current: 0, total: 0, currentTitle: "" });
+  };
+
+  const handleSimplifyReports = async () => {
+    if (!selectedReportIds || selectedReportIds.length === 0) return;
+    setSimplifying(true);
+    try {
+      const reportsContent = reports
+        .filter(r => selectedReportIds.includes(r.id))
+        .map(r => `--- Relatório: ${r.title} ---\n${r.result_raw}`)
+        .join("\n\n");
+
+      const res = await fetch("/api/ai/qa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool_type: "general_test_report",
+          input: "Por favor, crie um Resumo Simplificado e Executivo (mastigado) dos seguintes relatórios, voltado para não-técnicos, destacando: o que foi testado, o que deu errado e próximos passos:\n\n" + reportsContent,
+          framework: selectedFramework,
+          model: selectedModel,
+          project_id: projectId,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.report) {
+          setSelectedReport(data.report);
+          loadReports();
+          setSelectedReportIds([]);
+          setShowHistory(false);
+        }
+      } else {
+        alert("Erro ao gerar relatório simplificado.");
+      }
+    } catch {
+      alert("Erro ao gerar relatório simplificado.");
+    } finally {
+      setSimplifying(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!input.trim()) return;
     setLoading(true);
@@ -663,7 +821,7 @@ export function QaClient({ projectId }: QaClientProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tool_type: activeTab,
+          tool_type: activeTab === "reports" ? selectedReportType : activeTab,
           input: input.trim(),
           framework: selectedFramework,
           model: selectedModel,
@@ -679,16 +837,29 @@ export function QaClient({ projectId }: QaClientProps) {
       }
 
       if (activeTab === "test_cases") {
+        setTcStatus({});
         try {
-          const jsonStr = data.result.replace(/```json\n?|\n?```/g, "").trim();
-          const parsed = JSON.parse(jsonStr);
-          const tcs = (parsed.test_cases || []).map((tc: any, idx: number) => ({
+          let rawJson = data.result;
+          const match = rawJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (match) {
+            rawJson = match[1];
+          } else {
+            const firstBrace = rawJson.search(/[\{\[]/);
+            const lastBrace = Math.max(rawJson.lastIndexOf("}"), rawJson.lastIndexOf("]"));
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+              rawJson = rawJson.substring(firstBrace, lastBrace + 1);
+            }
+          }
+          const parsed = JSON.parse(rawJson);
+          const tcsArray = Array.isArray(parsed) ? parsed : (parsed.test_cases || []);
+          const tcs = tcsArray.map((tc: any, idx: number) => ({
             ...tc,
             id: tc.id || `tc-new-${Date.now()}-${idx}`
           }));
           setTestCases(tcs);
         } catch {
-          setResult(data.result);
+          // Parse failed — show the raw result as an error hint, don't show "Script Gerado"
+          setError("Não foi possível interpretar os casos de teste. Tente novamente ou use um modelo diferente.");
         }
       } else {
         setResult(data.result);
@@ -762,12 +933,21 @@ export function QaClient({ projectId }: QaClientProps) {
   };
 
   const exportTestCasesAsMarkdown = () => {
-    if (!testCases) return;
-    let md = "# Casos de Teste\n\n";
-    testCases.forEach(tc => {
+    if (!testCases || testCases.length === 0) return;
+    const testCasesToExport = selectedTestCaseIds.size > 0 
+      ? testCases.filter(tc => selectedTestCaseIds.has(tc.id))
+      : testCases;
+    
+    let md = "# Casos de Teste - Suite QA\n\n";
+    testCasesToExport.forEach(tc => {
+      const status = tcStatus[tc.id] || "idle";
+      const statusLabel: Record<string, string> = {
+        pass: "✅ PASSOU", fail: "❌ FALHOU", blocked: "⚠️ BLOQUEADO", idle: "⬜ PENDENTE",
+      };
       md += "## " + tc.id + " — " + tc.title + "\n";
-      md += "- **Categoria:** " + CATEGORY_LABEL[tc.category] + "\n";
-      md += "- **Prioridade:** " + tc.priority.toUpperCase() + "\n\n";
+      md += "- **Categoria:** " + (CATEGORY_LABEL[tc.category] || tc.category) + "\n";
+      md += "- **Prioridade:** " + tc.priority.toUpperCase() + "\n";
+      md += "- **Status:** " + statusLabel[status] + "\n\n";
       md += "**Passos:**\n";
       tc.steps.forEach((s, i) => { md += (i + 1) + ". " + s + "\n"; });
       md += "\n**Resultado Esperado:** " + tc.expected_result + "\n\n---\n\n";
@@ -776,42 +956,86 @@ export function QaClient({ projectId }: QaClientProps) {
   };
 
   const generateTestCasesPDF = () => {
-    if (!testCases) return;
+    if (!testCases || testCases.length === 0) return;
+    const testCasesToExport = selectedTestCaseIds.size > 0 
+      ? testCases.filter(tc => selectedTestCaseIds.has(tc.id))
+      : testCases;
+      
     const categoryColor: Record<string, string> = {
-      happy_path: "#10b981",
-      error: "#f43f5e",
-      edge_case: "#f59e0b",
+      happy_path: "#059669", error: "#e11d48", edge_case: "#d97706",
     };
     const priorityColor: Record<string, string> = {
-      alta: "#f43f5e",
-      media: "#f59e0b",
-      baixa: "#10b981",
+      alta: "#e11d48", media: "#d97706", baixa: "#059669",
     };
-    const rows = testCases.map(tc => {
+    const statusColor: Record<string, string> = {
+      pass: "#059669", fail: "#e11d48", blocked: "#d97706", idle: "#64748b",
+    };
+    const statusLabel: Record<string, string> = {
+      pass: "✅ PASSOU", fail: "❌ FALHOU", blocked: "⚠️ BLOQUEADO", idle: "⬜ PENDENTE",
+    };
+
+    // Summary metrics
+    const statuses = Object.values(tcStatus);
+    const passed = statuses.filter(s => s === "pass").length;
+    const failed = statuses.filter(s => s === "fail").length;
+    const blocked = statuses.filter(s => s === "blocked").length;
+    const total = testCasesToExport.length;
+    const pct = total ? Math.round((passed / total) * 100) : 0;
+
+    const summaryHtml = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.05)">
+          <p style="font-size:32px;font-weight:800;color:#0f172a;margin:0;line-height:1">${total}</p>
+          <p style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700;margin-top:8px;letter-spacing:0.5px">Total</p>
+        </div>
+        <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.05)">
+          <p style="font-size:32px;font-weight:800;color:#059669;margin:0;line-height:1">${passed}</p>
+          <p style="font-size:11px;color:#059669;text-transform:uppercase;font-weight:700;margin-top:8px;letter-spacing:0.5px">Passou</p>
+        </div>
+        <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.05)">
+          <p style="font-size:32px;font-weight:800;color:#e11d48;margin:0;line-height:1">${failed}</p>
+          <p style="font-size:11px;color:#e11d48;text-transform:uppercase;font-weight:700;margin-top:8px;letter-spacing:0.5px">Falhou</p>
+        </div>
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.05)">
+          <p style="font-size:32px;font-weight:800;color:#d97706;margin:0;line-height:1">${blocked}</p>
+          <p style="font-size:11px;color:#d97706;text-transform:uppercase;font-weight:700;margin-top:8px;letter-spacing:0.5px">Bloqueado</p>
+        </div>
+      </div>
+      <div style="background:#f1f5f9;border-radius:12px;height:12px;margin-bottom:32px;overflow:hidden;border:1px solid #e2e8f0">
+        <div style="height:100%;width:${pct}%;background:#10b981;border-radius:12px;"></div>
+      </div>
+    `;
+
+    const rows = testCasesToExport.map(tc => {
+      const status = tcStatus[tc.id] || "idle";
+      const sColor = statusColor[status];
+      const sLabel = statusLabel[status];
+      const borderLeft = status !== "idle" ? `border-left:5px solid ${sColor};` : "border-left:1px solid #cbd5e1;";
       const evidenceHtml = tc.evidence
-        ? `<div style="margin-top:12px"><p style="font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:6px">EVIDÊNCIA</p><img src="${tc.evidence}" style="max-width:100%;max-height:300px;border-radius:8px;border:1px solid #334155;display:block" /></div>`
+        ? `<div style="margin-top:16px;padding-top:16px;border-top:1px dashed #e2e8f0"><p style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:8px;letter-spacing:0.5px">EVIDÊNCIA</p><img src="${tc.evidence}" style="max-width:100%;max-height:350px;border-radius:8px;border:1px solid #cbd5e1;display:block" /></div>`
         : '';
       return `
-        <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:16px;page-break-inside:avoid">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div style="background:#ffffff;border:1px solid #cbd5e1;${borderLeft}border-radius:12px;padding:24px;margin-bottom:20px;page-break-inside:avoid;box-shadow:0 2px 4px rgba(0,0,0,0.02)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:12px">
             <div>
-              <span style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.05em">${tc.id}</span>
-              <h2 style="font-size:15px;font-weight:700;color:#f1f5f9;margin:4px 0 0">${tc.title}</h2>
+              <span style="font-size:12px;font-weight:800;color:#64748b;letter-spacing:0.5px">${tc.id}</span>
+              <h2 style="font-size:18px;font-weight:800;color:#0f172a;margin:6px 0 0">${tc.title}</h2>
             </div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:${priorityColor[tc.priority] || '#94a3b8'}22;color:${priorityColor[tc.priority] || '#94a3b8'};border:1px solid ${priorityColor[tc.priority] || '#94a3b8'}44;text-transform:uppercase">${tc.priority}</span>
-              <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:${categoryColor[tc.category] || '#94a3b8'}22;color:${categoryColor[tc.category] || '#94a3b8'};border:1px solid ${categoryColor[tc.category] || '#94a3b8'}44">${CATEGORY_LABEL[tc.category] || tc.category}</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:999px;background:${sColor}15;color:${sColor};border:1px solid ${sColor}40">${sLabel}</span>
+              <span style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:999px;background:${priorityColor[tc.priority] || '#64748b'}15;color:${priorityColor[tc.priority] || '#64748b'};border:1px solid ${priorityColor[tc.priority] || '#64748b'}40;text-transform:uppercase">${tc.priority}</span>
+              <span style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:999px;background:${categoryColor[tc.category] || '#64748b'}15;color:${categoryColor[tc.category] || '#64748b'};border:1px solid ${categoryColor[tc.category] || '#64748b'}40">${CATEGORY_LABEL[tc.category] || tc.category}</span>
             </div>
           </div>
-          <div style="margin-bottom:12px">
-            <p style="font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:8px">PASSOS</p>
+          <div style="margin-bottom:16px">
+            <p style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:0.5px;margin-bottom:10px">PASSOS</p>
             <ol style="margin:0;padding-left:0;list-style:none">
-              ${tc.steps.map((s, i) => `<li style="display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;font-size:13px;color:#e2e8f0"><span style="min-width:22px;height:22px;background:#6366f1;color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${i + 1}</span>${s}</li>`).join('')}
+              ${tc.steps.map((s, i) => `<li style="display:flex;gap:12px;align-items:flex-start;margin-bottom:8px;font-size:14px;color:#334155;line-height:1.5"><span style="min-width:24px;height:24px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${i + 1}</span>${s}</li>`).join('')}
             </ol>
           </div>
-          <div style="border-top:1px solid #334155;padding-top:12px">
-            <p style="font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:4px">RESULTADO ESPERADO</p>
-            <p style="font-size:13px;color:#34d399;margin:0">${tc.expected_result}</p>
+          <div style="border-top:1px solid #e2e8f0;padding-top:16px">
+            <p style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:0.5px;margin-bottom:6px">RESULTADO ESPERADO</p>
+            <p style="font-size:14px;font-weight:500;color:#059669;margin:0;line-height:1.5">${tc.expected_result}</p>
           </div>
           ${evidenceHtml}
         </div>
@@ -823,22 +1047,31 @@ export function QaClient({ projectId }: QaClientProps) {
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>Casos de Teste</title>
+        <title>Casos de Teste — QA Suite</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { background: #0f172a; font-family: 'Segoe UI', system-ui, sans-serif; padding: 32px; color: #f1f5f9; }
-          @media print { body { padding: 16px; } }
+          body { background: #f8fafc; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; padding: 40px; color: #334155; }
+          @media print { 
+            body { padding: 20px; background: #ffffff; }
+            .page-break { page-break-inside: avoid; }
+          }
         </style>
       </head>
       <body>
         <div style="max-width:900px;margin:0 auto">
-          <div style="margin-bottom:32px;border-bottom:1px solid #334155;padding-bottom:16px">
-            <h1 style="font-size:24px;font-weight:800;color:#f1f5f9">Casos de Teste</h1>
-            <p style="font-size:13px;color:#94a3b8;margin-top:4px">${testCases.length} casos gerados por IA &bull; ${new Date().toLocaleDateString('pt-BR')}</p>
+          <div style="margin-bottom:32px;border-bottom:2px solid #e2e8f0;padding-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end">
+            <div>
+              <h1 style="font-size:28px;font-weight:900;color:#0f172a;margin:0;letter-spacing:-0.5px">Casos de Teste</h1>
+              <p style="font-size:14px;color:#64748b;margin-top:8px;font-weight:500">${testCasesToExport.length} casos &bull; Gerado em ${new Date().toLocaleDateString('pt-BR')} &bull; ${pct}% de aprovação</p>
+            </div>
+            <div style="text-align:right">
+              <span style="font-size:12px;font-weight:800;color:#94a3b8;letter-spacing:1px;text-transform:uppercase">QA Suite Report</span>
+            </div>
           </div>
+          ${summaryHtml}
           ${rows}
         </div>
-        <script>window.onload=()=>{window.print();}<\/script>
+        <script>window.onload=()=>{window.print();}</script>
       </body>
       </html>
     `;
@@ -851,29 +1084,151 @@ export function QaClient({ projectId }: QaClientProps) {
     setSavingToProject(true);
     setSaveSuccess(false);
     try {
-      const res = await fetch("/api/ai/qa", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tool_type: "test_cases",
-          input: `[Importado manualmente] ${testCases.length} casos de teste`,
-          model: selectedModel,
+      const supabase = createClient();
+      
+      const tasksToInsert = testCases.map(tc => {
+        let desc = `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n`;
+        desc += `**Prioridade:** ${tc.priority.toUpperCase()}\n\n`;
+        desc += `**Passos:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
+        desc += `**Resultado Esperado:**\n${tc.expected_result}`;
+        
+        return {
           project_id: projectId,
-          // pass result directly to avoid re-generation
-          _prebuilt_result: JSON.stringify({ test_cases: testCases }),
-        }),
+          title: `[${tc.id}] ${tc.title}`,
+          description: desc,
+          status: "todo",
+          priority: "medium",
+          metadata: tc.evidence ? { evidence: tc.evidence } : {}
+        };
       });
-      if (res.ok) {
-        setSaveSuccess(true);
-        setTimeout(() => { setShowSaveModal(false); setSaveSuccess(false); }, 1800);
-      } else {
-        const d = await res.json();
-        alert("Erro ao salvar: " + (d.error || "desconhecido"));
-      }
+
+      const { error } = await supabase.from("tasks").insert(tasksToInsert);
+      if (error) throw error;
+      
+      setSaveSuccess(true);
+      setTimeout(() => { setShowSaveModal(false); setSaveSuccess(false); }, 1800);
     } catch (e: any) {
-      alert("Erro: " + e.message);
+      alert("Erro ao salvar tarefas: " + e.message);
     } finally {
       setSavingToProject(false);
+    }
+  };
+
+  const [creatingTask, setCreatingTask] = useState<string | null>(null);
+  const createStepTask = async (tcId: string, tcTitle: string, stepIndex: number, stepText: string, expectedResult: string) => {
+    if (!projectId) {
+      alert("Nenhum projeto selecionado. Você precisa estar dentro de um projeto para criar tarefas.");
+      return;
+    }
+    setCreatingTask(`${tcId}-${stepIndex}`);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.from("tasks").insert({
+        project_id: projectId,
+        title: `[QA] ${tcId} - Passo ${stepIndex + 1}`,
+        description: `Caso de teste: ${tcTitle}\n\n**Passo a ser executado/automatizado**:\n${stepText}\n\n**Resultado Esperado**:\n${expectedResult}`,
+        status: "todo",
+        priority: "medium",
+      });
+      if (error) throw error;
+      alert("Tarefa criada com sucesso! Verifique a aba Tarefas.");
+    } catch (e: any) {
+      alert("Erro ao criar tarefa: " + e.message);
+    } finally {
+      setCreatingTask(null);
+    }
+  };
+
+  // Converts current test cases into ReactFlow nodes/edges and saves to project.flow_data
+  const saveFlowToProject = async () => {
+    if (!testCases || testCases.length === 0 || !projectId) return;
+    setSavingFlow(true);
+    setSaveFlowSuccess(false);
+    try {
+      const COLS = 1;
+      const X_CENTER = 350;
+      const Y_START = 60;
+      const Y_STEP = 180;
+
+      const nodes: any[] = [];
+      const edges: any[] = [];
+
+      // Start node
+      nodes.push({ id: "start", type: "start", position: { x: X_CENTER, y: Y_START }, data: { label: "Início dos Testes" } });
+
+      testCases.forEach((tc, idx) => {
+        const yPos = Y_START + Y_STEP * (idx + 1);
+        const xPos = X_CENTER;
+        const tcNodeId = `tc-${tc.id}`;
+        const validNodeId = `valid-${tc.id}`;
+
+        // Main test case action node
+        nodes.push({
+          id: tcNodeId,
+          type: "action",
+          position: { x: xPos, y: yPos },
+          data: { label: `${tc.id}: ${tc.title}` },
+        });
+
+        // Validation node (expected result)
+        nodes.push({
+          id: validNodeId,
+          type: "validation",
+          position: { x: xPos + 280, y: yPos },
+          data: { label: tc.expected_result?.slice(0, 60) + (tc.expected_result?.length > 60 ? "..." : "") },
+        });
+
+        // Edge from previous node to this tc node
+        const prevId = idx === 0 ? "start" : `tc-${testCases[idx - 1].id}`;
+        edges.push({
+          id: `e-${prevId}-${tcNodeId}`,
+          source: prevId,
+          target: tcNodeId,
+          markerEnd: { type: "arrowclosed", width: 18, height: 18, color: "#64748b" },
+          style: { stroke: "#64748b", strokeWidth: 2 },
+        });
+
+        // Edge from tc node to validation
+        edges.push({
+          id: `e-${tcNodeId}-${validNodeId}`,
+          source: tcNodeId,
+          target: validNodeId,
+          label: "Verificar",
+          labelStyle: { fill: "#94a3b8", fontWeight: 600, fontSize: 10 },
+          labelBgStyle: { fill: "#1e293b", fillOpacity: 0.85 },
+          markerEnd: { type: "arrowclosed", width: 18, height: 18, color: "#64748b" },
+          style: { stroke: "#64748b", strokeWidth: 2 },
+        });
+      });
+
+      // End node
+      const lastTcId = `tc-${testCases[testCases.length - 1].id}`;
+      const yEnd = Y_START + Y_STEP * (testCases.length + 1);
+      nodes.push({ id: "end", type: "end", position: { x: X_CENTER, y: yEnd }, data: { label: "Fim dos Testes" } });
+      edges.push({
+        id: `e-${lastTcId}-end`,
+        source: lastTcId,
+        target: "end",
+        markerEnd: { type: "arrowclosed", width: 18, height: 18, color: "#64748b" },
+        style: { stroke: "#64748b", strokeWidth: 2 },
+      });
+
+      // Save to project via Supabase client
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("projects")
+        .update({ flow_data: { nodes, edges } })
+        .eq("id", projectId);
+
+      if (error) throw error;
+
+      setSaveFlowSuccess(true);
+      setTimeout(() => setSaveFlowSuccess(false), 3000);
+    } catch (e: any) {
+      alert("Erro ao salvar fluxograma: " + (e.message || "Tente novamente."));
+    } finally {
+      setSavingFlow(false);
     }
   };
 
@@ -1282,8 +1637,8 @@ export function QaClient({ projectId }: QaClientProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-border bg-card/50">
-        <div className="flex items-start justify-between flex-wrap gap-4">
+      <div className={cn("px-6 border-b border-border bg-card/50", externalTab ? "py-3" : "py-5")}>
+        {!externalTab && (
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
               <FlaskConical className="w-5 h-5 text-primary" />
@@ -1293,16 +1648,44 @@ export function QaClient({ projectId }: QaClientProps) {
               <p className="text-xs text-muted-foreground">Suite QA alimentada por IA · Kimi K2 especializado em automação</p>
             </div>
           </div>
+        )}
 
-          <div className="flex items-center gap-2">
+        {/* Unified Navigation & Actions Row */}
+        <div className={cn("flex items-center flex-wrap gap-4", !externalTab ? "mt-5 justify-between" : "justify-end")}>
+          {/* Tool Tabs */}
+          {!externalTab && (
+            <div className="flex gap-2 flex-wrap">
+            {tabs.map(t => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => { setActiveTab(t.key); setResult(null); setTestCases(null); setError(null); setHtmlFile(null); if (t.key !== "reports") setSelectedReportType(null); }}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all",
+                    activeTab === t.key
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25"
+                      : "glass text-muted-foreground hover:text-foreground border border-border"
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                  {t.label}
+                </button>
+              );
+            })}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Consolidated Report Button */}
             <button
               onClick={handleConsolidatedReport}
               disabled={consolidating || reports.length === 0}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all disabled:opacity-40"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-all disabled:opacity-40"
               title="Gerar relatório executivo de todos os testes"
             >
-              {consolidating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5" />}
+              {consolidating ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
               <span className="hidden sm:inline">Relatório Executivo</span>
             </button>
 
@@ -1314,13 +1697,13 @@ export function QaClient({ projectId }: QaClientProps) {
                 if (next) loadReports();
               }}
               className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-all",
+                "flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all",
                 showHistory
                   ? "bg-primary/15 text-primary border-primary/30"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-accent"
               )}
             >
-              <History className="w-3.5 h-3.5" />
+              <History className="w-4 h-4" />
               <span className="hidden sm:inline">Histórico</span>
               {reports.length > 0 && (
                 <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-bold">
@@ -1333,12 +1716,12 @@ export function QaClient({ projectId }: QaClientProps) {
             <div className="relative">
               <button
                 onClick={() => setShowModelMenu(!showModelMenu)}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl glass border border-border text-sm hover:border-primary/40 transition-all"
+                className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-card border border-border text-sm font-medium hover:bg-accent transition-all"
               >
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
-                <span className="font-medium text-foreground hidden sm:inline">{currentModel.label}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">{currentModel.provider}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                <Sparkles className="w-4 h-4 text-primary" />
+                <span className="text-foreground hidden sm:inline">{currentModel.label}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary font-bold uppercase tracking-wider">{currentModel.provider}</span>
+                <ChevronDown className="w-3 h-3 text-muted-foreground ml-1" />
               </button>
 
               <AnimatePresence>
@@ -1347,27 +1730,27 @@ export function QaClient({ projectId }: QaClientProps) {
                     initial={{ opacity: 0, y: -8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                    className="absolute right-0 mt-2 w-80 rounded-xl glass border border-border shadow-2xl z-50 overflow-hidden"
+                    className="absolute right-0 mt-2 w-80 rounded-xl bg-card border border-border shadow-2xl z-50 overflow-hidden"
                   >
-                    <div className="px-3 py-2 border-b border-border">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Selecionar Modelo de IA</p>
+                    <div className="px-3 py-2.5 border-b border-border bg-muted/20">
+                      <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Selecionar Modelo de IA</p>
                     </div>
                     {MODELS.map(m => (
                       <button
                         key={m.key}
                         onClick={() => { setSelectedModel(m.key); setShowModelMenu(false); }}
                         className={cn(
-                          "w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-accent transition-colors text-left",
-                          selectedModel === m.key && "bg-primary/10"
+                          "w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-accent transition-colors text-left border-b border-border/50 last:border-0",
+                          selectedModel === m.key && "bg-primary/5"
                         )}
                       >
-                        <div className="flex flex-col items-start">
-                          <span className="font-medium text-foreground">{m.label}</span>
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="font-semibold text-foreground">{m.label}</span>
                           <span className="text-[11px] text-muted-foreground">{m.provider}</span>
                         </div>
                         <span className={cn(
-                          "text-[10px] px-2 py-0.5 rounded-full border font-medium",
-                          m.key === "kimi-k2" ? "border-amber-400/40 text-amber-400" : "border-border text-muted-foreground"
+                          "text-[10px] px-2 py-1 rounded-md border font-bold uppercase tracking-wider",
+                          m.key === "kimi-k2" ? "border-amber-500/30 text-amber-500 bg-amber-500/10" : "border-border text-muted-foreground bg-accent/50"
                         )}>{m.badge}</span>
                       </button>
                     ))}
@@ -1376,28 +1759,6 @@ export function QaClient({ projectId }: QaClientProps) {
               </AnimatePresence>
             </div>
           </div>
-        </div>
-
-        {/* Tool Tabs */}
-        <div className="flex gap-2 mt-5 flex-wrap">
-          {tabs.map(t => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.key}
-                onClick={() => { setActiveTab(t.key); setResult(null); setTestCases(null); setError(null); setHtmlFile(null); if (t.key !== "reports") setSelectedReportType(null); }}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all",
-                  activeTab === t.key
-                    ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25"
-                    : "glass text-muted-foreground hover:text-foreground border border-border"
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {t.label}
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -1474,6 +1835,20 @@ export function QaClient({ projectId }: QaClientProps) {
                           >
                             <ArrowUpDown className="w-3.5 h-3.5" />
                             {historySort === "newest" ? "Recente" : "Antigo"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (selectedReportIds.length === filteredReports.length && filteredReports.length > 0) {
+                                setSelectedReportIds([]);
+                              } else {
+                                setSelectedReportIds(filteredReports.map(r => r.id));
+                              }
+                            }}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:text-foreground transition-all"
+                            title={selectedReportIds.length === filteredReports.length && filteredReports.length > 0 ? "Desmarcar todos" : "Selecionar todos"}
+                          >
+                            {selectedReportIds.length === filteredReports.length && filteredReports.length > 0 ? <CheckSquare className="w-3.5 h-3.5 text-primary" /> : <CheckSquare className="w-3.5 h-3.5" />}
+                            Todos
                           </button>
                           <span className="text-[10px] text-muted-foreground ml-auto">
                             {filteredReports.length} de {reports.length}
@@ -1605,6 +1980,14 @@ export function QaClient({ projectId }: QaClientProps) {
                                 </button>
                               )}
                               <button
+                                onClick={handleSimplifyReports}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                                disabled={isManagingReports || simplifying}
+                              >
+                                {simplifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                Resumo Simplificado
+                              </button>
+                              <button
                                 onClick={() => setExportingReportIds(selectedReportIds)}
                                 className="px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
                                 disabled={isManagingReports}
@@ -1716,6 +2099,17 @@ export function QaClient({ projectId }: QaClientProps) {
                                 Baixar .MD
                               </button>
                               <button
+                                onClick={() => {
+                                  const url = `${window.location.origin}/share/${selectedReport.id}`;
+                                  copyToClipboard(url);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all"
+                                title="Copiar link público de compartilhamento"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                                Compartilhar
+                              </button>
+                              <button
                                 onClick={() => copyToClipboard(selectedReport.result_raw)}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all"
                               >
@@ -1794,7 +2188,7 @@ export function QaClient({ projectId }: QaClientProps) {
 
         {/* Tab Content */}
         {activeTab === "smart_runner" ? (
-          <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} onImportPdf={importPdfFromUrl} />
+          <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} onImportPdf={importPdfFromUrl} defaultUrl={projectUrl} />
         ) : activeTab === "batch_runner" ? (
           <div className="max-w-5xl mx-auto px-6 pb-6">
             <BatchRunnerTab />
@@ -2036,123 +2430,206 @@ export function QaClient({ projectId }: QaClientProps) {
           <AnimatePresence>
             {testCases && testCases.length > 0 && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                <div className="flex items-center justify-between">
+
+                {/* ── Execution Summary Bar ── */}
+                {(() => {
+                  const statuses = Object.values(tcStatus);
+                  const passed = statuses.filter(s => s === "pass").length;
+                  const failed = statuses.filter(s => s === "fail").length;
+                  const blocked = statuses.filter(s => s === "blocked").length;
+                  const total = testCases.length;
+                  const executed = passed + failed + blocked;
+                  const pct = total ? Math.round((passed / total) * 100) : 0;
+                  if (executed === 0) return null;
+                  return (
+                    <div className="glass rounded-xl border border-border p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-foreground">Resumo de Execução</span>
+                        <span className="text-xs text-muted-foreground">{executed}/{total} executados</span>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold"><CheckCircle2 className="w-3.5 h-3.5" />{passed} Passou</div>
+                        <div className="flex items-center gap-1.5 text-xs text-rose-400 font-semibold"><AlertCircle className="w-3.5 h-3.5" />{failed} Falhou</div>
+                        <div className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold"><AlertTriangle className="w-3.5 h-3.5" />{blocked} Bloqueado</div>
+                        <div className="ml-auto text-xs font-bold text-foreground">{pct}% aprovação</div>
+                      </div>
+                      <div className="h-2 rounded-full bg-border/50 overflow-hidden">
+                        <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── Batch Progress Indicator ── */}
+                {isBatchRunning && (
+                  <div className="glass rounded-xl border border-primary/30 p-4 space-y-3 bg-primary/5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-primary flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Executando: {batchProgress.currentTitle}
+                      </span>
+                      <span className="text-xs font-bold text-primary">{batchProgress.current} / {batchProgress.total}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-border overflow-hidden">
+                      <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Action Bar ── */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <FlaskConical className="w-4 h-4 text-primary" />
-                    <h2 className="text-sm font-semibold text-foreground">{testCases.length} casos de teste gerados</h2>
+                    <h2 className="text-sm font-semibold text-foreground">{testCases.length} casos de teste</h2>
                     <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Salvo automaticamente</span>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  
+                  {/* Bulk Actions for Test Cases */}
+                  <div className="flex items-center gap-2 w-full mt-2 mb-1 p-2 bg-accent/30 rounded-lg border border-border/50">
                     <button
-                      onClick={() => downloadJSON(testCases, "casos-de-teste")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
+                      onClick={() => {
+                        if (selectedTestCaseIds.size === testCases.length && testCases.length > 0) {
+                          setSelectedTestCaseIds(new Set());
+                        } else {
+                          setSelectedTestCaseIds(new Set(testCases.map(tc => tc.id)));
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-background border border-border text-foreground hover:bg-accent transition-all"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Baixar JSON
+                      {selectedTestCaseIds.size === testCases.length && testCases.length > 0 ? <CheckSquare className="w-3.5 h-3.5 text-primary" /> : <CheckSquare className="w-3.5 h-3.5" />}
+                      Selecionar Todos
+                    </button>
+                    {selectedTestCaseIds.size > 0 && (
+                      <>
+                        <span className="text-xs font-medium text-muted-foreground ml-2">{selectedTestCaseIds.size} selecionados</span>
+                        <div className="flex-1" />
+                        <button
+                          onClick={runSelectedTestCases}
+                          disabled={isBatchRunning}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+                        >
+                          {isBatchRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                          Executar Selecionados
+                        </button>
+                        <button
+                          onClick={() => {
+                            if(!confirm(`Tem certeza que deseja apagar ${selectedTestCaseIds.size} casos de teste gerados?`)) return;
+                            setTestCases(testCases.filter(tc => !selectedTestCaseIds.has(tc.id)));
+                            setSelectedTestCaseIds(new Set());
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500/20 transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Apagar Selecionados
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={generateTestCasesPDF}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> 
+                      {selectedTestCaseIds.size > 0 ? `Exportar PDF (${selectedTestCaseIds.size})` : "Exportar PDF"}
                     </button>
                     <button
                       onClick={exportTestCasesAsMarkdown}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Exportar .MD
+                      <Download className="w-3.5 h-3.5" /> .MD
                     </button>
                     <button
-                      onClick={generateTestCasesPDF}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all"
+                      onClick={() => downloadJSON(testCases, "casos-de-teste")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
                     >
-                      <FileImage className="w-3.5 h-3.5" />
-                      Exportar PDF
+                      <Download className="w-3.5 h-3.5" /> JSON
                     </button>
                     <button
-                      onClick={() => { setSaveTargetProjectId(projectId); setShowSaveModal(true); }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-sky-400 hover:text-sky-300 border border-sky-500/30 hover:border-sky-400/50 bg-sky-500/5 hover:bg-sky-500/10 transition-all"
+                      onClick={() => {
+                        if (projectId) {
+                          saveTestCasesToProject(projectId);
+                        } else {
+                          setSaveTargetProjectId(projectId);
+                          setShowSaveModal(true);
+                        }
+                      }}
+                      disabled={savingToProject}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border font-semibold transition-all",
+                        saveSuccess
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                          : "bg-sky-500/5 text-sky-400 border-sky-500/30 hover:bg-sky-500/10 hover:border-sky-400/50"
+                      )}
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Salvar no Projeto
+                      {savingToProject ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...</>
+                      ) : saveSuccess ? (
+                        <><CheckCircle2 className="w-3.5 h-3.5" /> Salvo no Projeto!</>
+                      ) : (
+                        <><Check className="w-3.5 h-3.5" /> Salvar no Projeto</>
+                      )}
                     </button>
-                    {projectId && (
-                      <button
-                        onClick={() => router.push(`/projects/${projectId}?tab=flow`)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-400/50 bg-violet-500/5 hover:bg-violet-500/10 transition-all"
-                      >
-                        <GitBranch className="w-3.5 h-3.5" />
-                        Ver Fluxograma
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setShowFlowModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-400/50 bg-violet-500/5 hover:bg-violet-500/10 transition-all"
+                    >
+                      <GitBranch className="w-3.5 h-3.5" />
+                      {saveFlowSuccess ? "✓ Fluxo Salvo!" : "Fluxograma"}
+                    </button>
                     <button
                       onClick={() => copyToClipboard(JSON.stringify(testCases, null, 2))}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-all"
                     >
                       {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      {copied ? "Copiado!" : "Copiar JSON"}
+                      {copied ? "Copiado!" : "Copiar"}
                     </button>
                   </div>
                 </div>
 
-                {/* Save to Project Modal */}
+                {/* ── Save to Project Modal ── */}
                 <AnimatePresence>
                   {showSaveModal && (
                     <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
                       onClick={() => setShowSaveModal(false)}
                     >
                       <motion.div
-                        initial={{ scale: 0.95, y: 20 }}
-                        animate={{ scale: 1, y: 0 }}
-                        exit={{ scale: 0.95, y: 20 }}
+                        initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
                         className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4"
                         onClick={e => e.stopPropagation()}
                       >
                         <div className="flex items-center gap-3 mb-5">
                           <div className="w-9 h-9 rounded-xl bg-sky-500/10 flex items-center justify-center">
-                            <Download className="w-4 h-4 text-sky-400" />
+                            <Check className="w-4 h-4 text-sky-400" />
                           </div>
                           <div>
                             <h3 className="font-semibold text-foreground">Salvar no Projeto</h3>
                             <p className="text-xs text-muted-foreground">{testCases?.length} casos de teste serão vinculados</p>
                           </div>
-                          <button onClick={() => setShowSaveModal(false)} className="ml-auto p-1 text-muted-foreground hover:text-foreground transition-colors">
-                            <X className="w-4 h-4" />
-                          </button>
+                          <button onClick={() => setShowSaveModal(false)} className="ml-auto p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                         </div>
-
                         <div className="space-y-3">
-                          <label className="text-xs font-medium text-muted-foreground">Selecione o projeto de destino</label>
+                          <label className="text-xs font-medium text-muted-foreground">Projeto de destino</label>
                           <select
                             value={saveTargetProjectId}
                             onChange={e => setSaveTargetProjectId(e.target.value)}
-                            className="w-full bg-background border border-border rounded-lg text-sm p-2.5 focus:outline-none focus:border-primary/50 transition-colors"
+                            disabled={loadingProjects}
+                            className="w-full bg-background border border-border rounded-lg text-sm p-2.5 focus:outline-none focus:border-primary/50 disabled:opacity-60"
                           >
-                            <option value="">Selecione um projeto...</option>
-                            {projects.map(p => (
-                              <option key={p.id} value={p.id}>{p.title}</option>
-                            ))}
+                            <option value="">{loadingProjects ? "Carregando projetos..." : "Selecione..."}</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
                           </select>
                         </div>
-
                         <div className="flex gap-3 mt-5">
-                          <button
-                            onClick={() => setShowSaveModal(false)}
-                            className="flex-1 px-4 py-2 rounded-lg text-sm border border-border hover:bg-accent transition-colors"
-                          >
-                            Cancelar
-                          </button>
+                          <button onClick={() => setShowSaveModal(false)} className="flex-1 px-4 py-2 rounded-lg text-sm border border-border hover:bg-accent">Cancelar</button>
                           <button
                             onClick={() => saveTestCasesToProject(saveTargetProjectId)}
                             disabled={!saveTargetProjectId || savingToProject}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm bg-sky-500 text-white hover:bg-sky-400 transition-colors disabled:opacity-50 font-medium"
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-50 font-medium"
                           >
-                            {savingToProject ? (
-                              <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</>
-                            ) : saveSuccess ? (
-                              <><Check className="w-4 h-4" /> Salvo!</>
-                            ) : (
-                              <><Download className="w-4 h-4" /> Salvar</>
-                            )}
+                            {savingToProject ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : saveSuccess ? <><Check className="w-4 h-4" /> Salvo!</> : <><Check className="w-4 h-4" /> Salvar</>}
                           </button>
                         </div>
                       </motion.div>
@@ -2160,62 +2637,218 @@ export function QaClient({ projectId }: QaClientProps) {
                   )}
                 </AnimatePresence>
 
-                {/* Hidden input for test case evidence upload */}
-                <input
-                  ref={evidenceInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleEvidenceUpload}
-                />
+                {/* ── Flowchart Modal ── */}
+                <AnimatePresence>
+                  {showFlowModal && (
+                    <motion.div
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+                      onClick={() => setShowFlowModal(false)}
+                    >
+                      <motion.div
+                        initial={{ scale: 0.96, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 20 }}
+                        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div className="sticky top-0 bg-card border-b border-border px-5 py-4 flex items-center justify-between z-10">
+                          <div className="flex items-center gap-2">
+                            <GitBranch className="w-4 h-4 text-violet-400" />
+                            <h3 className="font-semibold text-foreground">Fluxograma dos Casos de Teste</h3>
+                            <span className="text-xs text-muted-foreground">({testCases.length} casos)</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Save to Flow tab */}
+                            <button
+                              onClick={saveFlowToProject}
+                              disabled={savingFlow}
+                              className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border font-semibold transition-all",
+                                saveFlowSuccess
+                                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                  : "bg-violet-500/10 text-violet-400 border-violet-500/30 hover:bg-violet-500/20"
+                              )}
+                            >
+                              {savingFlow ? (
+                                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...</>
+                              ) : saveFlowSuccess ? (
+                                <><CheckCircle2 className="w-3.5 h-3.5" /> Salvo no Projeto!</>
+                              ) : (
+                                <><Check className="w-3.5 h-3.5" /> Salvar no Projeto</>
+                              )}
+                            </button>
+                            {/* Open flow tab after saving */}
+                            {saveFlowSuccess && (
+                              <button
+                                onClick={() => { setShowFlowModal(false); router.push(`/projects/${projectId}?tab=flow`); }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-emerald-500 text-white border border-emerald-500 hover:bg-emerald-600 font-semibold transition-all"
+                              >
+                                <GitBranch className="w-3.5 h-3.5" /> Abrir Aba Fluxo →
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                const el = document.getElementById("tc-flowchart");
+                                if (!el) return;
+                                const w = window.open("", "_blank");
+                                if (!w) return;
+                                w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Fluxograma QA</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{background:#0f172a;font-family:'Segoe UI',system-ui,sans-serif;padding:32px;color:#f1f5f9;}@media print{body{padding:16px;}}</style></head><body>${el.innerHTML}<script>window.onload=()=>{window.print();}<\/script></body></html>`);
+                                w.document.close();
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-card text-muted-foreground border border-border hover:text-foreground hover:bg-accent"
+                            >
+                              <Printer className="w-3.5 h-3.5" /> PDF
+                            </button>
+                            <button onClick={() => setShowFlowModal(false)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+                          </div>
+                        </div>
+                        <div className="p-6" id="tc-flowchart">
+                          <div className="flex flex-col items-center gap-0">
+                            <div className="flex flex-col items-center">
+                              <div className="w-28 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold shadow-lg shadow-emerald-500/30">INÍCIO</div>
+                              <div className="w-px h-6 bg-border" />
+                            </div>
+                            {testCases.map((tc, idx) => {
+                              const status = tcStatus[tc.id] || "idle";
+                              const borderColor = status === "pass" ? "border-emerald-500" : status === "fail" ? "border-rose-500" : status === "blocked" ? "border-amber-500" : "border-primary/40";
+                              const bg = status === "pass" ? "bg-emerald-500/10" : status === "fail" ? "bg-rose-500/10" : status === "blocked" ? "bg-amber-500/10" : "bg-primary/5";
+                              const badge = status === "pass" ? "✅ PASSOU" : status === "fail" ? "❌ FALHOU" : status === "blocked" ? "⚠️ BLOQUEADO" : null;
+                              return (
+                                <div key={tc.id} className="flex flex-col items-center w-full">
+                                  <div className={`w-full max-w-lg rounded-xl border-2 ${borderColor} ${bg} p-4 space-y-2`}>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-bold text-muted-foreground bg-accent px-2 py-0.5 rounded">{tc.id}</span>
+                                        <span className="text-sm font-semibold text-foreground">{tc.title}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        {badge && <span className="text-[10px] font-bold">{badge}</span>}
+                                        <span className={cn("text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border", PRIORITY_COLOR[tc.priority] || PRIORITY_COLOR["media"])}>{tc.priority}</span>
+                                      </div>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground line-clamp-2">{tc.steps[0]}{tc.steps.length > 1 ? ` (+${tc.steps.length - 1} passos)` : ""}</p>
+                                    <div className="pt-1 border-t border-border/40 text-[10px] text-emerald-400 truncate">→ {tc.expected_result}</div>
+                                  </div>
+                                  {idx < testCases.length - 1 && (
+                                    <div className="flex flex-col items-center">
+                                      <div className="w-px h-4 bg-border" />
+                                      <div className="w-6 h-6 rotate-45 border-2 border-border bg-card" />
+                                      <div className="w-px h-4 bg-border" />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div className="flex flex-col items-center">
+                              <div className="w-px h-6 bg-border" />
+                              <div className="w-28 h-10 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold shadow-lg shadow-rose-500/30">FIM</div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
+                {/* Hidden evidence upload */}
+                <input ref={evidenceInputRef} type="file" accept="image/*" className="hidden" onChange={handleEvidenceUpload} />
+
+                {/* ── Individual Test Case Cards ── */}
                 <div className="space-y-3">
                   {testCases.map((tc) => {
                     const CatIcon = CATEGORY_ICON[tc.category] || AlertCircle;
+                    const status = tcStatus[tc.id] || "idle";
+                    const cardBorder = status === "pass" ? "border-emerald-500/60 bg-emerald-500/5" : status === "fail" ? "border-rose-500/60 bg-rose-500/5" : status === "blocked" ? "border-amber-500/60 bg-amber-500/5" : "border-border";
                     return (
                       <motion.div key={tc.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                        className="glass rounded-xl border border-border p-4 space-y-3"
+                        className={`glass rounded-xl border p-4 space-y-3 transition-colors ${cardBorder}`}
                       >
                         <div className="flex items-start justify-between gap-3 flex-wrap">
                           <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedTestCaseIds.has(tc.id)}
+                              onChange={() => {
+                                const next = new Set(selectedTestCaseIds);
+                                if (next.has(tc.id)) next.delete(tc.id);
+                                else next.add(tc.id);
+                                setSelectedTestCaseIds(next);
+                              }}
+                              className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-1 cursor-pointer mr-1"
+                            />
                             <CatIcon className={cn("w-4 h-4 shrink-0", CATEGORY_COLOR[tc.category])} />
                             <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{tc.id}</span>
                             <h3 className="text-sm font-semibold text-foreground">{tc.title}</h3>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border", PRIORITY_COLOR[tc.priority] || PRIORITY_COLOR["media"])}>
-                              {tc.priority}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground bg-accent px-2 py-0.5 rounded-full">
-                              {CATEGORY_LABEL[tc.category]}
-                            </span>
+                            <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border", PRIORITY_COLOR[tc.priority] || PRIORITY_COLOR["media"])}>{tc.priority}</span>
+                            <span className="text-[10px] text-muted-foreground bg-accent px-2 py-0.5 rounded-full">{CATEGORY_LABEL[tc.category]}</span>
                           </div>
                         </div>
+
                         <div>
                           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Passos</p>
                           <ol className="space-y-1">
-                            {tc.steps.map((step, si) => (
-                              <li key={si} className="flex items-start gap-2.5 text-sm text-foreground">
-                                <span className="shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">{si + 1}</span>
-                                {step}
-                              </li>
-                            ))}
+                            {tc.steps.map((step, si) => {
+                              const isCreating = creatingTask === `${tc.id}-${si}`;
+                              return (
+                                <li key={si} className="flex items-start gap-2.5 text-sm text-foreground group">
+                                  <span className="shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">{si + 1}</span>
+                                  <span className="flex-1 mt-0.5">{step}</span>
+                                  <button 
+                                    onClick={() => createStepTask(tc.id, tc.title, si, step, tc.expected_result)}
+                                    disabled={isCreating}
+                                    className="opacity-0 group-hover:opacity-100 flex items-center gap-1.5 px-2 py-1 bg-accent hover:bg-primary/10 hover:text-primary text-muted-foreground rounded text-[10px] font-semibold transition-all shrink-0 disabled:opacity-50"
+                                    title="Criar tarefa na aba Tarefas"
+                                  >
+                                    {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                    Gerar Tarefa
+                                  </button>
+                                </li>
+                              );
+                            })}
                           </ol>
                         </div>
+
                         <div className="pt-2 border-t border-border/50">
                           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Resultado Esperado</p>
                           <p className="text-sm text-emerald-400">{tc.expected_result}</p>
                         </div>
 
-                        {/* Evidence Display & Upload */}
+                        <div className="pt-2 border-t border-border/50 flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Resultado da Execução</span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setTcStatus(prev => ({ ...prev, [tc.id]: prev[tc.id] === "pass" ? "idle" : "pass" }))}
+                              className={cn("flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all",
+                                status === "pass" ? "bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/30" : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                              )}
+                            >
+                              <CheckCircle2 className="w-3 h-3" /> PASSOU
+                            </button>
+                            <button
+                              onClick={() => setTcStatus(prev => ({ ...prev, [tc.id]: prev[tc.id] === "fail" ? "idle" : "fail" }))}
+                              className={cn("flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all",
+                                status === "fail" ? "bg-rose-500 text-white border-rose-500 shadow-lg shadow-rose-500/30" : "border-rose-500/40 text-rose-400 hover:bg-rose-500/10"
+                              )}
+                            >
+                              <AlertCircle className="w-3 h-3" /> FALHOU
+                            </button>
+                            <button
+                              onClick={() => setTcStatus(prev => ({ ...prev, [tc.id]: prev[tc.id] === "blocked" ? "idle" : "blocked" }))}
+                              className={cn("flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all",
+                                status === "blocked" ? "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/30" : "border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                              )}
+                            >
+                              <AlertTriangle className="w-3 h-3" /> BLOQUEADO
+                            </button>
+                          </div>
+                        </div>
+
                         {tc.evidence ? (
                           <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Evidência Anexada</span>
-                              <button
-                                onClick={() => handleRemoveEvidence(tc.id)}
-                                className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors cursor-pointer"
-                              >
+                              <button onClick={() => handleRemoveEvidence(tc.id)} className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-1">
                                 <X className="w-3 h-3" /> Remover
                               </button>
                             </div>
@@ -2224,10 +2857,10 @@ export function QaClient({ projectId }: QaClientProps) {
                             </div>
                           </div>
                         ) : (
-                          <div className="mt-3 pt-3 border-t border-border/50 flex justify-end">
+                          <div className="flex justify-end">
                             <button
                               onClick={() => { setActiveEvidenceTcId(tc.id); setTimeout(() => evidenceInputRef.current?.click(), 50); }}
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold border border-border hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold border border-border hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all"
                             >
                               <Upload className="w-3 h-3" /> Anexar Evidência
                             </button>
@@ -2241,9 +2874,9 @@ export function QaClient({ projectId }: QaClientProps) {
             )}
           </AnimatePresence>
 
-          {/* Text/Code Result */}
+          {/* Text/Code Result — only shown outside test_cases tab */}
           <AnimatePresence>
-            {result && (
+            {result && activeTab !== "test_cases" && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -2343,9 +2976,10 @@ export function QaClient({ projectId }: QaClientProps) {
                 <select
                   value={selectedExportProjectId}
                   onChange={e => setSelectedExportProjectId(e.target.value)}
-                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  disabled={loadingProjects}
+                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60"
                 >
-                  <option value="">Selecione...</option>
+                  <option value="">{loadingProjects ? "Carregando projetos..." : "Selecione..."}</option>
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.title}</option>
                   ))}

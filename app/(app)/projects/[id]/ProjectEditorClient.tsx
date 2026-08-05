@@ -16,6 +16,9 @@ import {
   Download,
   Network,
   TestTube2,
+  Zap,
+  ListTree,
+  FlaskConical,
 } from "lucide-react";
 import { BlockEditor } from "@/components/editor/BlockEditor";
 import { InsightBadge } from "@/components/dashboard/InsightBadge";
@@ -80,10 +83,10 @@ export function ProjectEditorClient({
   const deletePage = async (pageId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("Tem certeza que deseja apagar esta página?")) return;
-    
+
     const supabase = createClient();
     await supabase.from("pages").delete().eq("id", pageId);
-    
+
     setPages(prev => prev.filter(p => p.id !== pageId));
     if (selectedPage?.id === pageId) {
       setSelectedPage(pages.find(p => p.id !== pageId) || null);
@@ -127,7 +130,7 @@ export function ProjectEditorClient({
               setInsights((prev) => [data.insight, ...prev.slice(0, 4)]);
             }
           }
-        } catch {}
+        } catch { }
       }, 5000);
     },
     [selectedPage, project.id]
@@ -372,18 +375,60 @@ export function ProjectEditorClient({
               Fluxo
             </button>
             <button
-              id="tab-qa"
-              onClick={() => setTab("qa")}
+              id="tab-smart_runner"
+              onClick={() => setTab("smart_runner")}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
-                tab === "qa"
+                tab === "smart_runner"
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:text-foreground hover:bg-accent"
               )}
-              aria-pressed={tab === "qa"}
+              aria-pressed={tab === "smart_runner"}
             >
-              <TestTube2 className="w-3.5 h-3.5" />
-              QA & Testes
+              <Zap className="w-3.5 h-3.5" />
+              Runner IA
+            </button>
+            <button
+              id="tab-batch_runner"
+              onClick={() => setTab("batch_runner")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                tab === "batch_runner"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              )}
+              aria-pressed={tab === "batch_runner"}
+            >
+              <ListTree className="w-3.5 h-3.5" />
+              Lote / Fila
+            </button>
+            <button
+              id="tab-test_cases"
+              onClick={() => setTab("test_cases")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                tab === "test_cases"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              )}
+              aria-pressed={tab === "test_cases"}
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+              Casos de Teste
+            </button>
+            <button
+              id="tab-reports"
+              onClick={() => setTab("reports")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                tab === "reports"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              )}
+              aria-pressed={tab === "reports"}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Relatórios QA
             </button>
             <button
               id="tab-report"
@@ -516,19 +561,20 @@ export function ProjectEditorClient({
             <TaskPanel
               tasks={tasks}
               projectId={project.id}
+              projectUrl={project.target_url || undefined}
               onTasksChange={setTasks}
             />
           )}
 
           {tab === "flow" && (
-            <TestFlowTab 
-              projectId={project.id} 
-              initialFlowData={project.flow_data} 
+            <TestFlowTab
+              projectId={project.id}
+              initialFlowData={project.flow_data}
             />
           )}
 
-          {tab === "qa" && (
-            <QaClient projectId={project.id} />
+          {["smart_runner", "batch_runner", "test_cases", "reports"].includes(tab) && (
+            <QaClient projectId={project.id} externalTab={tab as any} projectUrl={project.target_url || undefined} />
           )}
         </div>
       </div>

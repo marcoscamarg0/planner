@@ -11,11 +11,12 @@ import type { ProjectWithStats, Project, ProjectStatus } from "@/types";
 
 interface ProjectsClientProps {
   projectsWithStats: ProjectWithStats[];
+  userId?: string;
 }
 
 type ViewMode = "grid" | "list";
 
-export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
+export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProps) {
   const [projects, setProjects] = useState(projectsWithStats);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "all">("all");
@@ -174,6 +175,7 @@ export function ProjectsClient({ projectsWithStats }: ProjectsClientProps) {
                 project={project} 
                 subProjects={getSubProjects(project.id)}
                 index={i} 
+                currentUserId={userId}
               />
             ))}
           </div>

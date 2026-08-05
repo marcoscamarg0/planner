@@ -67,6 +67,8 @@ const SMART_RUN_SYSTEM_PROMPT = [
   '  ]',
   '}',
   '',
+  '10. IDIOMA OBRIGATÓRIO: Você deve responder EXCLUSIVAMENTE em Português do Brasil (PT-BR), inclusive nos labels.',
+  '',
   'IMPORTANTE: Responda ESTRITAMENTE com o JSON válido contendo o array "steps". Não inclua blocos de markdown ```json. Feche todos os objetos corretamente.',
 ].join('\n');
 
@@ -670,16 +672,49 @@ export async function POST(req: Request) {
       let axeViolations: any[] = [];
       if (includeAxe) {
         try {
-          await logToStream('[SmartRun] Executando auditoria de acessibilidade Axe...');
+          await logToStream('[SmartRun] Executando auditoria de acessibilidade (Axe Core + HTMLCS)...');
           await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
           const { default: AxeBuilder } = await import('@axe-core/playwright');
           const axeResult = await (new (AxeBuilder as any)({ page }))
             .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
             .analyze();
-          axeViolations = axeResult.violations;
-          await logToStream('[SmartRun] Axe encontrou ' + axeViolations.length + ' violacoes.');
+          let allViolations = [...axeResult.violations];
+
+          try {
+            await page.addScriptTag({ url: 'https://cdnjs.cloudflare.com/ajax/libs/HTML_CodeSniffer/2.5.1/HTMLCS.min.js' });
+            const htmlcsMsgs = await page.evaluate(() => {
+              return new Promise<any[]>((resolve) => {
+                if (!(window as any).HTMLCS) { resolve([]); return; }
+                (window as any).HTMLCS.process('WCAG2AA', document.documentElement, () => {
+                  const msgs = (window as any).HTMLCS.getMessages();
+                  resolve(msgs.map((m: any) => ({
+                    type: m.type,
+                    msg: m.msg,
+                    code: m.code,
+                    html: m.element ? m.element.outerHTML.substring(0, 200) : ''
+                  })));
+                });
+              });
+            });
+            const mappedHtmlcs = htmlcsMsgs
+              .filter((m: any) => m.type === 1 || m.type === 2)
+              .map((m: any) => ({
+                id: m.code,
+                description: '[HTMLCS] ' + m.msg,
+                help: 'Regra HTMLCS: ' + m.code,
+                helpUrl: '',
+                impact: m.type === 1 ? 'critical' : 'moderate',
+                nodes: [{ html: m.html || 'Sem HTML extraído' }]
+              }));
+            allViolations = [...allViolations, ...mappedHtmlcs];
+          } catch (htmlcsErr) {
+            await logToStream('[SmartRun] HTMLCS falhou: ' + String(htmlcsErr));
+          }
+
+          axeViolations = allViolations;
+          await logToStream('[SmartRun] Encontradas ' + axeViolations.length + ' violações combinadas.');
         } catch (e) {
-          await logToStream('[SmartRun] Auditoria Axe falhou: ' + String(e));
+          await logToStream('[SmartRun] Auditoria Acessibilidade falhou: ' + String(e));
         }
       }
 
@@ -812,7 +847,7 @@ export async function POST(req: Request) {
           }).eq('id', reportId);
           await logToStream('[SmartRun] Historico atualizado no Supabase.');
         } else {
-          await supabase.from('qa_reports').insert({
+          const { data: insertedReport, error } = await supabase.from('qa_reports').insert({
             user_id: user.id,
             type: 'smart_runner',
             title: 'Auditoria IA: ' + displayName,
@@ -821,15 +856,20 @@ export async function POST(req: Request) {
             model_used: model,
             result_raw: JSON.stringify(resultJsonDataForDb),
             result_json: resultJsonDataForDb,
-          });
+          }).select('id').single();
+          if (!error && insertedReport) {
+            reportId = insertedReport.id;
+          }
           await logToStream('[SmartRun] Historico salvo no Supabase.');
         }
       } catch (dbErr) {
         await logToStream('[SmartRun] Falha ao salvar no historico do BD: ' + String(dbErr));
       }
 
+      const finalResultData = { ...resultJsonData, reportId };
+
       await logToStream('[SmartRun] Teste concluido!');
-      await writer.write(encoder.encode(JSON.stringify({ type: 'result', data: resultJsonData }) + '\n'));
+      await writer.write(encoder.encode(JSON.stringify({ type: 'result', data: finalResultData }) + '\n'));
 
     } catch (err: any) {
       console.error('[SmartRun Error]', err);

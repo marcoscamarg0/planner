@@ -19,7 +19,6 @@ export default async function ProjectsPage() {
   const { data: projects } = await supabase
     .from("projects")
     .select("*")
-    .eq("owner_id", user.id)
     .order("updated_at", { ascending: false });
 
   const projectIds = (projects ?? []).map((p) => p.id);
@@ -50,5 +49,5 @@ export default async function ProjectsPage() {
     };
   });
 
-  return <ProjectsClient projectsWithStats={projectsWithStats} />;
+  return <ProjectsClient projectsWithStats={projectsWithStats} userId={user.id} />;
 }

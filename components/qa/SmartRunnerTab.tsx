@@ -96,9 +96,9 @@ function StepBadge({ status }: { status: StepResult["status"] }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Componente principal
 // ──────────────────────────────────────────────────────────────────────────────
-export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?: RunResult | null, onImportPdf?: (url: string) => void }) {
+export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { initialReport?: RunResult | null, onImportPdf?: (url: string) => void, defaultUrl?: string }) {
   const [testType, setTestType]           = useState("smart_ai");
-  const [targetUrl, setTargetUrl]         = useState("");
+  const [targetUrl, setTargetUrl]         = useState(defaultUrl || "");
   const [flowDescription, setFlowDescription] = useState("");
   const [jobName, setJobName]             = useState("");
   const [model, setModel]                 = useState("auto-free");
@@ -108,6 +108,12 @@ export function SmartRunnerTab({ initialReport, onImportPdf }: { initialReport?:
   const [phase, setPhase]         = useState<RunPhase>("idle");
   const [result, setResult]       = useState<RunResult | null>(null);
   const [errorMsg, setErrorMsg]   = useState<string | null>(null);
+
+  useEffect(() => {
+    if (defaultUrl && !targetUrl) {
+      setTargetUrl(defaultUrl);
+    }
+  }, [defaultUrl]);
   const [currentPhaseMsg, setCurrentPhaseMsg] = useState("");
   const [elapsed, setElapsed]     = useState(0);
   const [showSteps, setShowSteps] = useState(false);

@@ -57,6 +57,7 @@ export default async function ProjectPage({ params }: Props) {
       tasks={tasks ?? []}
       insights={insights ?? []}
       initialPage={firstPage}
+      currentUserId={user.id}
     />
   );
 }
