@@ -74,7 +74,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
       current++;
       setBatchProgress({ current, total, title: task.title });
       
-      const rawCode = task.metadata?.automationCode || "";
+      const rawCode = (task.metadata?.automationCode as string) || "";
       const codeMatch = rawCode.match(/```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)\s*```/);
       const code = codeMatch ? codeMatch[1] : rawCode;
 
@@ -123,7 +123,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
         const passed = finalResult?.success === true;
         const nextStatus = passed ? "done" : "in_progress";
         const newMetadata = { ...(task.metadata || {}), lastRunResult: finalResult };
-        if (passed) delete newMetadata.automationCode;
+        if (passed) delete (newMetadata as any).automationCode;
         
         updatedTasks = updatedTasks.map(t => t.id === task.id ? { ...t, status: nextStatus, metadata: newMetadata } : t);
         onTasksChange(updatedTasks);

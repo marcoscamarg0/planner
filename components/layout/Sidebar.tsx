@@ -104,7 +104,7 @@ function ProjectNavItem({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -8 }}
       draggable
-      onDragStart={handleDragStart}
+      onDragStart={handleDragStart as any}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

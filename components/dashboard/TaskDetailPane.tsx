@@ -139,7 +139,7 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
   const executeTaskAutomation = async () => {
     if (!task) return;
     
-    const rawCode = task.metadata?.automationCode;
+    const rawCode = (task.metadata?.automationCode as string) || "";
     if (!rawCode) {
       alert("Nenhum código de automação encontrado nesta tarefa. Gere a automação primeiro.");
       return;
@@ -351,7 +351,7 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
                     {loadingPlan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                     {loadingPlan ? "Gerando..." : "Gerar Plano"}
                   </button>
-                  {task.metadata?.automationCode && (
+                  {!!task.metadata?.automationCode && (
                     <button
                       onClick={executeTaskAutomation}
                       disabled={running}
@@ -371,7 +371,7 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
                 className="w-full h-[250px] bg-black/10 dark:bg-black/40 text-sm text-foreground placeholder:text-muted-foreground rounded-xl p-4 outline-none border border-border/50 resize-y focus:border-primary/50 transition-colors font-mono leading-relaxed"
               />
 
-              {task.metadata?.automationCode && (
+              {!!task.metadata?.automationCode && (
                 <div className="mt-4 pt-4 border-t border-border/50">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
@@ -387,7 +387,7 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
                   </div>
                   {showCode && (
                     <pre className="bg-black/50 text-[10px] text-sky-300 p-4 rounded-xl overflow-x-auto max-h-[300px] border border-border/50 font-mono">
-                      {task.metadata.automationCode}
+                      {String(task.metadata.automationCode)}
                     </pre>
                   )}
                 </div>

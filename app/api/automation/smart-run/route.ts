@@ -745,7 +745,7 @@ export async function POST(req: Request) {
         await logToStream('[SmartRun] Executando verificação de links...');
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         const links = await page.evaluate(() => Array.from(document.querySelectorAll('a[href]')).map(a => (a as HTMLAnchorElement).href));
-        const uniqueLinks = Array.from(new Set(links)).filter(l => l.startsWith('http')).slice(0, 15); // limit to 15 to avoid long times
+        const uniqueLinks = Array.from(new Set(links as string[])).filter(l => l.startsWith('http')).slice(0, 15); // limit to 15 to avoid long times
         
         await logToStream(`[SmartRun] ${uniqueLinks.length} links unicos encontrados para teste.`);
         for (let i = 0; i < uniqueLinks.length; i++) {

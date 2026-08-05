@@ -179,7 +179,7 @@ export default defineConfig({
 
     const tarGzBuffer = createTar(files);
 
-    return new NextResponse(tarGzBuffer, {
+    return new NextResponse(tarGzBuffer as any, {
       status: 200,
       headers: {
         'Content-Type': 'application/gzip',
