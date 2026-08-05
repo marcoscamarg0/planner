@@ -47,7 +47,57 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
   const [bulkStatus, setBulkStatus] = useState<TaskStatus | "">("");
   const [bulkPriority, setBulkPriority] = useState<TaskPriority | "">("");
   const [isBatchRunning, setIsBatchRunning] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, title: "" });
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, title: "", action: "Executando" });
+
+  const generateBulkAutomation = async () => {
+    const ids = Array.from(selectedTasks);
+    if (ids.length === 0) return;
+    
+    const tasksToGenerate = ids.map(id => tasks.find(t => t.id === id)).filter(Boolean) as Task[];
+    if (tasksToGenerate.length === 0) return;
+
+    setIsBatchRunning(true);
+    let current = 0;
+    const total = tasksToGenerate.length;
+    const supabase = createClient();
+    let updatedTasks = [...tasks];
+
+    for (const task of tasksToGenerate) {
+      current++;
+      setBatchProgress({ current, total, title: task.title, action: "Gerando" });
+      
+      try {
+        const res = await fetch("/api/ai/qa", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tool_type: "automation",
+            input: `Título da Tarefa: ${task.title}\n\nDescrição e Passos:\n${task.description || ""}`,
+            model: "auto-free",
+            project_id: projectId
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result) {
+            const codeBlock = data.result.includes("```") ? data.result : `\`\`\`javascript\n${data.result}\n\`\`\``;
+            const newMetadata = { ...(task.metadata || {}), automationCode: codeBlock };
+            
+            updatedTasks = updatedTasks.map(t => t.id === task.id ? { ...t, metadata: newMetadata } : t);
+            onTasksChange(updatedTasks);
+            await supabase.from("tasks").update({ metadata: newMetadata, updated_at: new Date().toISOString() }).eq("id", task.id);
+          }
+        }
+      } catch (e) {
+        // Ignora e continua
+      }
+    }
+    
+    setIsBatchRunning(false);
+    setBatchProgress({ current: 0, total: 0, title: "", action: "Executando" });
+    setSelectedTasks(new Set());
+  };
 
   const executeBulkAutomation = async () => {
     const ids = Array.from(selectedTasks);
@@ -72,7 +122,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     for (const task of tasksToRun) {
       if (!task) continue;
       current++;
-      setBatchProgress({ current, total, title: task.title });
+      setBatchProgress({ current, total, title: task.title, action: "Executando" });
       
       const rawCode = (task.metadata?.automationCode as string) || "";
       const codeMatch = rawCode.match(/```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)\s*```/);
@@ -134,7 +184,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     }
     
     setIsBatchRunning(false);
-    setBatchProgress({ current: 0, total: 0, title: "" });
+    setBatchProgress({ current: 0, total: 0, title: "", action: "Executando" });
     setSelectedTasks(new Set());
   };
 
@@ -386,6 +436,14 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
             </span>
             <div className="flex items-center gap-2">
               <button
+                onClick={generateBulkAutomation}
+                disabled={isBatchRunning}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 text-sky-500 transition-all disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Gerar
+              </button>
+              <button
                 onClick={executeBulkAutomation}
                 disabled={isBatchRunning}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 transition-all disabled:opacity-50 flex items-center gap-1.5"
@@ -462,7 +520,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-primary flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Executando: {batchProgress.title}
+                {batchProgress.action}: {batchProgress.title}
               </span>
               <span className="text-xs font-bold text-primary">{batchProgress.current} / {batchProgress.total}</span>
             </div>
