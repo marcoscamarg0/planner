@@ -49,6 +49,7 @@ import {
   Plus,
   CheckSquare,
   Play,
+  Share2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
