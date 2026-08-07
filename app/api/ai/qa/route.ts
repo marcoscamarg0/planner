@@ -273,12 +273,13 @@ export async function POST(req: Request) {
 
       const sys = "Você é um engenheiro de QA sênior. Para CADA cenário listado abaixo, gere exatamente 1 caso de teste. "
         + "NÃO agrupe cenários diferentes. NÃO omita nenhum cenário. "
+        + "Crie um 'title' completo e descritivo (NUNCA use reticências '...'). "
         + "Retorne APENAS JSON válido no formato: "
-        + '{"test_cases": [{"id": "TC001", "title": "...", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
+        + '{"test_cases": [{"id": "TC001", "title": "título descritivo completo do teste sem abreviações", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
 
       const usr = `Crie 1 caso de teste para CADA um dos ${processedInput.match(/Cenário \d+:/g)?.length || 1} cenários abaixo. NÃO pule nenhum.\n\n`
         + processedInput + htmlContext
-        + "\n\nRetorne apenas o JSON com TODOS os casos de teste, um por cenário.";
+        + "\n\nRetorne apenas o JSON com TODOS os casos de teste, um por cenário, com títulos completos sem reticências.";
 
       result = await callOpenRouter(
         [{ role: "system", content: sys }, { role: "user", content: usr }],
@@ -295,7 +296,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "test_cases",
-        title: "Casos de Teste — " + (input.slice(0, 60) + (input.length > 60 ? "..." : "")),
+        title: "Casos de Teste — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -324,7 +325,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "test_report",
-        title: "Relatório — " + (input.slice(0, 60) + (input.length > 60 ? "..." : "")),
+        title: "Relatório — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -366,7 +367,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "automation",
-        title: "Automação " + fw.charAt(0).toUpperCase() + fw.slice(1) + " — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
+        title: "Automação " + fw.charAt(0).toUpperCase() + fw.slice(1) + " — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: fw,
         model_used: model,
@@ -455,7 +456,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "general_test_report",
-        title: "Relatório Geral de Testes — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
+        title: "Relatório Geral de Testes — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -489,7 +490,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "ter",
-        title: "Relatório de Execução (TER) — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
+        title: "Relatório de Execução (TER) — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -529,7 +530,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "bug_report",
-        title: "Relatório de Bugs — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
+        title: "Relatório de Bugs — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -564,7 +565,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "rtm",
-        title: "Matriz de Rastreabilidade (RTM) — " + (input.slice(0, 45) + (input.length > 45 ? "..." : "")),
+        title: "Matriz de Rastreabilidade (RTM) — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -598,7 +599,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "smoke_test",
-        title: "Relatório de Teste de Fumaça — " + (input.slice(0, 48) + (input.length > 48 ? "..." : "")),
+        title: "Relatório de Teste de Fumaça — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -638,7 +639,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "performance_report",
-        title: "Relatório de Desempenho — " + (input.slice(0, 52) + (input.length > 52 ? "..." : "")),
+        title: "Relatório de Desempenho — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -678,7 +679,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "security_report",
-        title: "Relatório de Segurança — " + (input.slice(0, 52) + (input.length > 52 ? "..." : "")),
+        title: "Relatório de Segurança — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -714,7 +715,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "regression_report",
-        title: "Relatório de Regressão — " + (input.slice(0, 50) + (input.length > 50 ? "..." : "")),
+        title: "Relatório de Regressão — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -750,7 +751,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "compliance_report",
-        title: "Relatório de Conformidade — " + (input.slice(0, 48) + (input.length > 48 ? "..." : "")),
+        title: "Relatório de Conformidade — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -788,7 +789,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         project_id: project_id || null,
         type: "uat_report",
-        title: "Relatório de UAT — " + (input.slice(0, 55) + (input.length > 55 ? "..." : "")),
+        title: "Relatório de UAT — " + (input.split('\n')[0].slice(0, 200) + (input.split('\n')[0].length > 200 ? "..." : "")),
         input_description: input,
         framework: null,
         model_used: model,
@@ -799,7 +800,12 @@ export async function POST(req: Request) {
       createdReport = inserted?.[0];
 
     } else if (tool_type === "summarize_report") {
-      const sys = "Você é um engenheiro de QA. Resuma os resultados deste teste de forma EXTREMAMENTE DIRETA, SIMPLIFICADA E RESUMIDA. Vá direto ao ponto, em no máximo 1 ou 2 frases. Diga apenas se passou/falhou e qual foi o objetivo principal ou erro principal. Sem enrolação. Retorne APENAS o texto plano. IDIOMA OBRIGATÓRIO: Português do Brasil (PT-BR).";
+      const sys = "Você é um engenheiro de QA. Analise os resultados deste teste e retorne um resumo ESTRITAMENTE PADRONIZADO E CURTO (no máximo 2 frases).\\n\\n"
+        + "Inicie OBRIGATORIAMENTE com 'Status - Passou: ' ou 'Status - Falhou: ', seguido do motivo principal ou objetivo validado.\\n\\n"
+        + "Exemplos:\\n"
+        + "Status - Passou: A navegação ocorreu com sucesso sem erros.\\n"
+        + "Status - Falhou: O formulário apresentou erro 500 ao enviar dados corretos.\\n\\n"
+        + "Retorne APENAS o texto padronizado, sem formatação markdown.";
 
       const usr = "Resuma o seguinte resultado de teste de forma extremamente curta (1 ou 2 frases max):\n\n" + input.slice(0, 8000);
 
