@@ -14,6 +14,7 @@ import {
   Calendar,
   TestTube2,
   Network,
+  Table2,
 } from "lucide-react";
 import { useState, DragEvent } from "react";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,11 @@ const navItems = [
     href: "/organogram",
     label: "Mapas Mentais",
     icon: Network,
+  },
+  {
+    href: "/spreadsheet",
+    label: "Gerador de Planilhas",
+    icon: Table2,
   },
 ];
 

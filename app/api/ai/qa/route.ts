@@ -69,7 +69,7 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
       return result;
     } catch (err: any) {
       lastError = err;
-      const isRetryable = err.status === 429 || err.status === 408 || err.status >= 500 || (err.message && (err.message.includes("429") || err.message.includes("502") || err.message.includes("503")));
+      const isRetryable = err.status === 404 || err.status === 429 || err.status === 408 || err.status >= 500 || (err.message && (err.message.includes("404") || err.message.includes("429") || err.message.includes("502") || err.message.includes("503")));
       const isAbort = err.name === "AbortError";
       if (isRetryable || isAbort) {
         console.warn(`[QA API] Model ${model} failed (${isAbort ? "timeout" : "provider error " + err.status}), trying next fallback...`);
@@ -798,6 +798,17 @@ export async function POST(req: Request) {
       if (insertError) throw insertError;
       createdReport = inserted?.[0];
 
+    } else if (tool_type === "summarize_report") {
+      const sys = "Você é um engenheiro de QA. Resuma os resultados deste teste de forma EXTREMAMENTE DIRETA, SIMPLIFICADA E RESUMIDA. Vá direto ao ponto, em no máximo 1 ou 2 frases. Diga apenas se passou/falhou e qual foi o objetivo principal ou erro principal. Sem enrolação. Retorne APENAS o texto plano. IDIOMA OBRIGATÓRIO: Português do Brasil (PT-BR).";
+
+      const usr = "Resuma o seguinte resultado de teste de forma extremamente curta (1 ou 2 frases max):\n\n" + input.slice(0, 8000);
+
+      result = await callOpenRouter(
+        [{ role: "system", content: sys }, { role: "user", content: usr }],
+        model, apiKey
+      );
+
+      return NextResponse.json({ success: true, summary: result });
     } else {
       return NextResponse.json({ error: "Invalid tool_type" }, { status: 400 });
     }

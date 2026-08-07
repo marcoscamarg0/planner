@@ -19,16 +19,17 @@ interface NewProjectModalProps {
   onClose: () => void;
   onCreated: (project: Project) => void;
   projects?: Project[];
+  forcedParentId?: string;
 }
 
-export function NewProjectModal({ open, onClose, onCreated, projects = [] }: NewProjectModalProps) {
+export function NewProjectModal({ open, onClose, onCreated, projects = [], forcedParentId }: NewProjectModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [emoji, setEmoji] = useState("📁");
   const [color, setColor] = useState(COLORS[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [parentId, setParentId] = useState<string>("none");
+  const [parentId, setParentId] = useState<string>(forcedParentId || "none");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,7 +56,7 @@ export function NewProjectModal({ open, onClose, onCreated, projects = [] }: New
         emoji,
         color,
         status: "active",
-        parent_id: parentId !== "none" ? parentId : null,
+        parent_id: forcedParentId ? forcedParentId : (parentId !== "none" ? parentId : null),
       })
       .select()
       .single();
@@ -79,7 +80,7 @@ export function NewProjectModal({ open, onClose, onCreated, projects = [] }: New
     if (!loading) {
       setTitle("");
       setDescription("");
-      setParentId("none");
+      setParentId(forcedParentId || "none");
       setError(null);
       onClose();
     }
@@ -221,7 +222,7 @@ export function NewProjectModal({ open, onClose, onCreated, projects = [] }: New
                   />
                 </div>
 
-                {projects.length > 0 && (
+                {projects.length > 0 && !forcedParentId && (
                   <div className="space-y-1.5">
                     <label
                       htmlFor="project-parent"

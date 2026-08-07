@@ -16,14 +16,16 @@ import {
   Download,
   Network,
   TestTube2,
-  Zap,
   ListTree,
   FlaskConical,
+  Table2,
+  Zap,
 } from "lucide-react";
 import { BlockEditor } from "@/components/editor/BlockEditor";
 import { InsightBadge } from "@/components/dashboard/InsightBadge";
 import { TaskPanel } from "@/components/dashboard/TaskPanel";
 import { TestFlowTab } from "@/components/projects/TestFlowTab";
+import { QaResultsSpreadsheetTab } from "@/components/projects/QaResultsSpreadsheetTab";
 import { QaClient } from "@/app/(app)/qa/QaClient";
 import { createClient } from "@/lib/supabase/client";
 import { extractTextFromTipTap, cn } from "@/lib/utils";
@@ -38,7 +40,7 @@ interface ProjectEditorClientProps {
   currentUserId: string;
 }
 
-type Tab = "editor" | "tasks" | "flow" | "qa" | "smart_runner" | "batch_runner" | "test_cases" | "reports";
+type Tab = "editor" | "tasks" | "flow" | "flow_spreadsheet" | "qa" | "smart_runner" | "batch_runner" | "test_cases" | "reports";
 
 export function ProjectEditorClient({
   project,
@@ -57,7 +59,7 @@ export function ProjectEditorClient({
 
   // Initialize the active tab from the URL ?tab= parameter
   const initialTab = (searchParams?.get("tab") as Tab) || "editor";
-  const [tab, setTab] = useState<Tab>(["editor", "tasks", "flow", "qa", "smart_runner", "batch_runner", "test_cases", "reports"].includes(initialTab) ? initialTab : "editor");
+  const [tab, setTab] = useState<Tab>(["editor", "tasks", "flow", "flow_spreadsheet", "qa", "smart_runner", "batch_runner", "test_cases", "reports"].includes(initialTab) ? initialTab : "editor");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [suggestedTasks, setSuggestedTasks] = useState<string[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -377,6 +379,20 @@ export function ProjectEditorClient({
               Fluxo
             </button>
             <button
+              id="tab-flow-spreadsheet"
+              onClick={() => setTab("flow_spreadsheet")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                tab === "flow_spreadsheet"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              )}
+              aria-pressed={tab === "flow_spreadsheet"}
+            >
+              <Table2 className="w-3.5 h-3.5" />
+              Planilha
+            </button>
+            <button
               id="tab-smart_runner"
               onClick={() => setTab("smart_runner")}
               className={cn(
@@ -572,6 +588,13 @@ export function ProjectEditorClient({
             <TestFlowTab
               projectId={project.id}
               initialFlowData={project.flow_data}
+            />
+          )}
+
+          {tab === "flow_spreadsheet" && (
+            <QaResultsSpreadsheetTab
+              projectId={project.id}
+              targetUrl={project.target_url}
             />
           )}
 

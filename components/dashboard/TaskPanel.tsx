@@ -193,6 +193,10 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
       ? tasks
       : tasks.filter((t) => t.status === filterStatus);
 
+  const sortedParentTasks = filteredTasks
+    .filter((t) => !t.parent_task_id)
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+
   const toggleTaskSelection = (taskId: string) => {
     const newSet = new Set(selectedTasks);
     if (newSet.has(taskId)) newSet.delete(taskId);
@@ -231,7 +235,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
           let updatedTask = { ...t, ...updates };
           if (bulkStatus === "done" && updatedTask.metadata?.automationCode) {
             const metadata = { ...updatedTask.metadata };
-            delete metadata.automationCode;
+            delete (metadata as any).automationCode;
             updatedTask.metadata = metadata;
           }
           return updatedTask;
@@ -239,26 +243,30 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
         return t;
       });
 
-      // Se for "done", vamos precisar atualizar a metadata das tasks no banco
+      // Atualização otimista da UI (Instantânea)
+      onTasksChange(newTasks);
+      setShowBulkEdit(false);
+      setSelectedTasks(new Set());
+      setBulkStatus("");
+      setBulkPriority("");
+
+      // Se for "done", precisamos atualizar a metadata das tasks no banco (em paralelo)
       if (bulkStatus === "done") {
-        for (const t of newTasks.filter(nt => selectedTasks.has(nt.id))) {
-          await supabase.from("tasks").update({ 
-            status: "done", 
-            metadata: t.metadata, 
-            updated_at: updates.updated_at 
-          }).eq("id", t.id);
-        }
+        await Promise.all(
+          newTasks.filter(nt => ids.includes(nt.id)).map(t => 
+            supabase.from("tasks").update({ 
+              status: "done", 
+              metadata: t.metadata, 
+              updated_at: updates.updated_at 
+            }).eq("id", t.id)
+          )
+        );
       } else {
         await supabase.from("tasks").update(updates).in("id", ids);
       }
-
-      onTasksChange(newTasks);
+    } else {
+      setShowBulkEdit(false);
     }
-    
-    setShowBulkEdit(false);
-    setSelectedTasks(new Set());
-    setBulkStatus("");
-    setBulkPriority("");
   };
 
 
@@ -569,9 +577,11 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
         </AnimatePresence>
 
         <AnimatePresence>
-          {filteredTasks.filter(t => !t.parent_task_id).map((task, i) => {
+          {sortedParentTasks.map((task, i) => {
             const StatusIcon = STATUS_ICON[task.status];
-            const taskSubtasks = tasks.filter(t => t.parent_task_id === task.id && (filterStatus === "all" || t.status === filterStatus));
+            const taskSubtasks = tasks
+              .filter(t => t.parent_task_id === task.id && (filterStatus === "all" || t.status === filterStatus))
+              .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
             
             return (
               <motion.div
