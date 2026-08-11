@@ -358,7 +358,7 @@ export function ProjectEditorClient({
               <FileText className="w-4 h-4" />
               Editor
               {tab === "editor" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -383,7 +383,7 @@ export function ProjectEditorClient({
                 </span>
               )}
               {tab === "tasks" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -400,7 +400,7 @@ export function ProjectEditorClient({
               <Network className="w-4 h-4" />
               Fluxo
               {tab === "flow" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -417,7 +417,7 @@ export function ProjectEditorClient({
               <Table2 className="w-4 h-4" />
               Planilha
               {tab === "flow_spreadsheet" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -434,7 +434,7 @@ export function ProjectEditorClient({
               <Zap className="w-4 h-4" />
               Runner IA
               {tab === "smart_runner" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -451,7 +451,7 @@ export function ProjectEditorClient({
               <ListTree className="w-4 h-4" />
               Lote / Fila
               {tab === "batch_runner" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -468,7 +468,7 @@ export function ProjectEditorClient({
               <FlaskConical className="w-4 h-4" />
               Casos de Teste
               {tab === "test_cases" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
@@ -485,7 +485,7 @@ export function ProjectEditorClient({
               <FileText className="w-4 h-4" />
               Relatórios QA
               {tab === "reports" && (
-                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
