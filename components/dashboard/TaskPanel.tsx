@@ -547,7 +547,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               onSubmit={addTask}
-              className="flex items-center gap-2 glass rounded-xl px-4 py-3"
+              className="flex items-center gap-2 bg-surface border border-border/50 rounded-xl px-4 py-3"
             >
               <input
                 type="text"
@@ -594,11 +594,11 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
               >
                 <div
                   className={cn(
-                    "flex items-start gap-3 px-4 py-3 rounded-xl glass-hover group flex-col sm:flex-row relative",
+                    "flex items-start gap-3 px-4 py-3 border border-transparent border-b-border hover:bg-accent/30 group flex-col sm:flex-row relative transition-colors",
                     task.status === "done" && "opacity-60"
                   )}
                 >
-                  <div className="flex items-start gap-3 w-full z-10">
+                  <div className="flex items-center gap-3 w-full z-10">
                     <button
                       onClick={() => toggleTaskSelection(task.id)}
                       className="mt-0.5 shrink-0 flex items-center justify-center transition-colors text-muted-foreground hover:text-primary"
@@ -692,7 +692,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
                       onSubmit={(e) => addSubtask(task.id, e)}
-                      className="ml-8 mt-2 flex items-center gap-2 glass rounded-xl px-4 py-2 relative overflow-hidden"
+                      className="ml-8 mt-2 flex items-center gap-2 bg-surface border border-border/50 rounded-xl px-4 py-2 relative overflow-hidden"
                     >
                       <div className="absolute left-[-24px] top-1/2 w-8 h-px bg-border/50" />
                       <input
@@ -723,7 +723,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                         <div key={subtask.id} className="relative">
                           <div className="absolute left-[-20px] top-4 w-4 h-px bg-border/50" />
                           <div className={cn(
-                            "flex items-start gap-3 px-4 py-2 rounded-xl glass-hover group flex-col sm:flex-row",
+                            "flex items-center gap-3 px-4 py-2 border-b border-border/30 hover:bg-accent/20 group flex-col sm:flex-row transition-colors",
                             subtask.status === "done" && "opacity-60"
                           )}>
                             <button

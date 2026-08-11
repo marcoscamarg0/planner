@@ -159,16 +159,60 @@ async function generateStepsFromDescription(
         const parsed = robustJsonParse(cleaned);
         if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
           const steps = parsed.steps as SmartStep[];
-          console.log('[SmartRun] IA gerou ' + steps.length + ' passos');
+          console.log('[SmartRun] IA gerou ' + steps.length + ' passos via OpenRouter');
           return steps.map(s => s.action === 'newPage' ? { ...s, action: 'wait' as const, milliseconds: 1000 } : s);
         }
       } catch (parseErr) {
         console.error('[SmartRun] Falha ao parsear JSON da IA (500 chars):', cleaned?.slice(0, 500));
         throw parseErr;
       }
+    } else {
+      console.warn('[SmartRun] Falha na API do OpenRouter:', res.status, await res.text());
+      throw new Error("OpenRouter API Failed");
     }
   } catch (err) {
-    console.error('[SmartRun] Falha ao gerar passos via IA:', err);
+    console.error('[SmartRun] Falha ao gerar passos via IA (OpenRouter). Tentando fallback para Groq...', err);
+    
+    // --- Groq Fallback ---
+    const groqKey = process.env.GROQ_API_KEY;
+    if (groqKey) {
+      try {
+        console.log("[SmartRun] Tentando Groq fallback (llama-3.3-70b-versatile)...");
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + groqKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ 
+            model: "llama-3.3-70b-versatile", 
+            messages: [
+              { role: 'system', content: SMART_RUN_SYSTEM_PROMPT },
+              { role: 'user',   content: typeof userMessageContent === 'string' ? userMessageContent : "Gere os passos baseados nas instruções. Não é possível enviar imagens para este modelo no momento." },
+            ],
+            temperature: 0.1, 
+            max_tokens: 4000,
+            response_format: { type: 'json_object' }
+          }),
+        });
+        
+        if (groqRes.ok) {
+          const data = await groqRes.json();
+          const content = (data.choices?.[0]?.message?.content || '') as string;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, '').trim();
+
+          const parsed = robustJsonParse(cleaned);
+          if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+            const steps = parsed.steps as SmartStep[];
+            console.log('[SmartRun] IA gerou ' + steps.length + ' passos via Groq');
+            return steps.map(s => s.action === 'newPage' ? { ...s, action: 'wait' as const, milliseconds: 1000 } : s);
+          }
+        }
+      } catch (groqErr) {
+        console.error('[SmartRun] Falha ao gerar passos via Groq:', groqErr);
+      }
+    }
   }
 
   // Fallback
@@ -786,28 +830,41 @@ export async function POST(req: Request) {
         plannedSteps: steps.map(s => s.label)
       });
 
-      const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
-      if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
-
       const htmlFilename = 'smart-' + runId + '.html';
-      const htmlPath = path.join(reportsDir, htmlFilename);
-      fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
+      let htmlReportUrl = '';
+
+      try {
+        const { data, error: htmlErr } = await supabase.storage.from('reports').upload(htmlFilename, htmlContent, { contentType: 'text/html', upsert: true });
+        if (htmlErr) throw htmlErr;
+        htmlReportUrl = supabase.storage.from('reports').getPublicUrl(htmlFilename).data.publicUrl;
+        await logToStream('[SmartRun] Relatório HTML enviado para nuvem.');
+      } catch (err) {
+        await logToStream('[SmartRun] Falha no upload HTML para a nuvem. Salvando local: ' + String(err));
+        const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
+        if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+        const htmlPath = path.join(reportsDir, htmlFilename);
+        fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
+        htmlReportUrl = '/reports/' + htmlFilename;
+      }
 
       let pdfUrl: string | undefined;
-      const htmlReportUrl = '/reports/' + htmlFilename;
 
       try {
         const pdfBrowser = await (await getChromium()).launch({ headless: true, args: ['--no-sandbox'] });
         const pdfPage = await pdfBrowser.newPage();
         await pdfPage.setContent(htmlContent, { waitUntil: 'networkidle', timeout: 30000 });
         const pdfFilename = 'smart-' + runId + '.pdf';
-        const pdfPath = path.join(reportsDir, pdfFilename);
-        await pdfPage.pdf({ path: pdfPath, format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
+        
+        const pdfBuffer = await pdfPage.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
         await pdfBrowser.close();
-        pdfUrl = '/reports/' + pdfFilename;
-        await logToStream('[SmartRun] PDF salvo com sucesso.');
+
+        const { error: pdfErr } = await supabase.storage.from('reports').upload(pdfFilename, pdfBuffer, { contentType: 'application/pdf', upsert: true });
+        if (pdfErr) throw pdfErr;
+        
+        pdfUrl = supabase.storage.from('reports').getPublicUrl(pdfFilename).data.publicUrl;
+        await logToStream('[SmartRun] PDF salvo com sucesso no Supabase Storage.');
       } catch (pdfErr) {
-        await logToStream('[SmartRun] Geracao de PDF falhou, HTML disponivel.');
+        await logToStream('[SmartRun] Geracao de PDF ou upload falhou, HTML disponivel. ' + String(pdfErr));
       }
 
       const resultJsonData = {

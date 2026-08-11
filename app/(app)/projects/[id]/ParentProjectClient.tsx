@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, FolderKanban, Network, ArrowLeft } from "lucide-react";
+import { Plus, FolderKanban, Network, ArrowLeft, ArrowRight } from "lucide-react";
 import { ProjectCard } from "@/components/dashboard/ProjectCard";
 import { NewProjectModal } from "@/components/dashboard/NewProjectModal";
 import type { Project, ProjectWithStats } from "@/types";
@@ -97,16 +97,85 @@ export function ParentProjectClient({ project, subProjects, currentUserId }: Par
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {subProjects.map((subProject, i) => (
-                <ProjectCard
-                  key={subProject.id}
-                  project={subProject}
-                  subProjects={[]} // They don't have further nesting displayed here usually
-                  index={i}
-                  currentUserId={currentUserId}
-                />
-              ))}
+            <div className="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-muted/50 text-muted-foreground text-xs font-medium border-b border-border">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Subprojeto</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Progresso</th>
+                    <th className="px-4 py-3 font-medium text-center">Tarefas</th>
+                    <th className="px-4 py-3 font-medium text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {subProjects.map((sub, index) => {
+                    const progressRate = sub.total_tasks > 0
+                      ? Math.round((sub.completed_tasks / sub.total_tasks) * 100)
+                      : 0;
+
+                    return (
+                      <tr 
+                        key={sub.id}
+                        className="group transition-colors hover:bg-accent/50"
+                      >
+                        <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
+                          <div 
+                            onClick={() => router.push(`/projects/${sub.id}`)} 
+                            className="flex items-center gap-3 cursor-pointer"
+                          >
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${sub.color}20` }}>
+                              <span className="text-sm">{sub.emoji ?? "📁"}</span>
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-medium text-foreground truncate">{sub.title}</span>
+                              {sub.description && (
+                                <span className="text-xs text-muted-foreground truncate">{sub.description}</span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className={
+                              sub.status === "active" ? "bg-emerald-500 w-2 h-2 rounded-full" :
+                              sub.status === "paused" ? "bg-amber-500 w-2 h-2 rounded-full" :
+                              sub.status === "completed" ? "bg-primary w-2 h-2 rounded-full" : "bg-muted-foreground w-2 h-2 rounded-full"
+                            } />
+                            <span className="text-xs capitalize text-muted-foreground">
+                              {sub.status === "active" ? "Ativo" :
+                               sub.status === "paused" ? "Pausado" :
+                               sub.status === "completed" ? "Concluído" : "Arquivado"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 w-48">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-primary rounded-full transition-all duration-500"
+                                style={{ width: `${progressRate}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground w-8 text-right">{progressRate}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-muted-foreground text-xs">
+                          {sub.completed_tasks}/{sub.total_tasks}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button 
+                            onClick={() => router.push(`/projects/${sub.id}`)}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border transition-all"
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

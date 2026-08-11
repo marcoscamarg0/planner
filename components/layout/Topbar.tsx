@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Bell, LogOut, User, ChevronDown, AlertCircle, Clock, Sparkles } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useRouter, usePathname } from "next/navigation";
+import { Bell, LogOut, User, Search, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { MagicAddModal } from "@/components/dashboard/MagicAddModal";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import type { Profile, Project } from "@/types";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { CommandPalette } from "@/components/ui/CommandPalette";
 
 interface TopbarProps {
   profile: Profile | null;
@@ -27,10 +27,9 @@ interface Notification {
 
 export function Topbar({ profile, title, onOpenChat, projects = [] }: TopbarProps) {
   const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [magicOpen, setMagicOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
+  const pathname = usePathname();
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [cmdOpen, setCmdOpen] = useState(false);
 
   useEffect(() => {
     async function fetchNotifications() {
@@ -45,6 +44,17 @@ export function Topbar({ profile, title, onOpenChat, projects = [] }: TopbarProp
     fetchNotifications();
   }, []);
 
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setCmdOpen((open) => !open);
+      }
+    };
+    document.addEventListener("keydown", down);
+    return () => document.removeEventListener("keydown", down);
+  }, []);
+
   const handleLogout = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -53,197 +63,118 @@ export function Topbar({ profile, title, onOpenChat, projects = [] }: TopbarProp
   };
 
   const initials = profile?.full_name
-    ? profile.full_name
-        .split(" ")
-        .slice(0, 2)
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase()
+    ? profile.full_name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase()
     : profile?.email?.[0]?.toUpperCase() ?? "?";
 
+  // Breadcrumb generator
+  const getBreadcrumbs = () => {
+    if (pathname === "/dashboard") return "Dashboard";
+    if (pathname === "/projects") return "Projetos";
+    if (pathname.startsWith("/projects/")) return title || "Detalhes do Projeto";
+    if (pathname === "/qa") return "Testes (QA)";
+    return title || "";
+  };
+
   return (
-    <header
-      className="h-14 border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30 flex items-center px-6 justify-between"
-      role="banner"
-    >
-      {title && (
-        <h1 className="text-sm font-semibold text-foreground truncate max-w-xs">
-          {title}
-        </h1>
-      )}
-      {!title && <div />}
-
-      <div className="flex items-center gap-2.5">
-        <button
-          onClick={() => setMagicOpen(true)}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 text-xs font-semibold transition-all"
-        >
-          ✨ Magic Add
-        </button>
-
-        {onOpenChat && (
-          <button
-            id="topbar-open-chat"
-            onClick={onOpenChat}
-            aria-label="Abrir Assistente IA"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 text-xs font-semibold transition-all shadow-sm"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Assistente IA</span>
-          </button>
-        )}
-
-        <ThemeToggle />
-
-        <div className="relative">
-          <button
-            id="topbar-notifications"
-            aria-label="Notificações"
-            onClick={() => setNotifOpen(!notifOpen)}
-            className="w-9 h-9 rounded-xl bg-muted hover:bg-accent flex items-center justify-center transition-colors text-muted-foreground hover:text-foreground relative"
-          >
-            <Bell className="w-4 h-4" />
-            {notifications.length > 0 && (
-              <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-            )}
-          </button>
-
-          <AnimatePresence>
-            {notifOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setNotifOpen(false)}
-                  aria-hidden="true"
-                />
-                <motion.div
-                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  role="dialog"
-                  aria-label="Notificações de Prazos"
-                  className="absolute right-0 top-full mt-2 w-80 max-h-[400px] overflow-y-auto custom-scrollbar bg-card rounded-xl border border-border shadow-xl z-50"
-                >
-                  <div className="px-4 py-3 border-b border-border flex items-center justify-between sticky top-0 bg-card/90 backdrop-blur-sm">
-                    <h3 className="text-sm font-semibold text-foreground">Atenção Executiva</h3>
-                    <span className="text-xs bg-rose-500/20 text-rose-500 px-2 py-0.5 rounded-full font-medium">
-                      {notifications.length} urgências
-                    </span>
-                  </div>
-
-                  <div className="p-2">
-                    {notifications.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-6">
-                        Nenhuma demanda crítica ou vencendo nas próximas 48h.
-                      </p>
-                    ) : (
-                      notifications.map(notif => {
-                        const isOverdue = new Date(notif.due_date) < new Date();
-                        return (
-                          <div key={notif.id} className="p-3 hover:bg-accent rounded-lg transition-colors cursor-default border border-transparent hover:border-border/50">
-                            <div className="flex items-start gap-2.5">
-                              {isOverdue ? <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" /> : <Clock className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />}
-                              <div>
-                                <p className="text-sm font-medium text-foreground leading-tight">{notif.title}</p>
-                                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ backgroundColor: notif.projects?.color }} />
-                                  <span className="truncate max-w-[120px]">{notif.projects?.title}</span>
-                                  <span className="opacity-50">•</span>
-                                  <span className={isOverdue ? "text-rose-400 font-medium" : "text-amber-400 font-medium"}>
-                                    {isOverdue ? 'Atrasado' : 'Vence breve'}
-                                  </span>
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
+    <>
+      <header
+        className="h-14 border-b border-border bg-background sticky top-0 z-30 flex items-center px-4 justify-between transition-colors"
+        role="banner"
+      >
+        <div className="flex items-center gap-2">
+          <h1 className="text-sm font-semibold text-foreground truncate max-w-xs font-outfit">
+            {getBreadcrumbs()}
+          </h1>
         </div>
 
-        <div className="relative">
+        <div className="flex-1 flex justify-center max-w-md mx-4 hidden md:flex">
           <button
-            id="topbar-user-menu"
-            onClick={() => setMenuOpen(!menuOpen)}
-            aria-label="Menu do usuário"
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            className="flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-xl hover:bg-accent transition-colors group"
+            onClick={() => setCmdOpen(true)}
+            className="w-full h-9 rounded-md bg-surface border border-border flex items-center px-3 gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors"
           >
-            <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">
-              {initials}
-            </div>
-            <span className="text-sm text-foreground font-medium hidden sm:block max-w-[120px] truncate">
-              {profile?.full_name ?? profile?.email ?? "Usuário"}
-            </span>
-            <ChevronDown
-              className={cn(
-                "w-3.5 h-3.5 text-muted-foreground transition-transform duration-200",
-                menuOpen && "rotate-180"
-              )}
-            />
+            <Search className="w-4 h-4" />
+            <span className="flex-1 text-left">Busque ou digite um comando...</span>
+            <kbd className="hidden sm:inline-flex h-5 items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
+              <span className="text-xs">⌘</span>K
+            </kbd>
           </button>
-
-          <AnimatePresence>
-            {menuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setMenuOpen(false)}
-                  aria-hidden="true"
-                />
-                <motion.div
-                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  role="menu"
-                  aria-label="Opções do usuário"
-                  className="absolute right-0 top-full mt-2 w-52 bg-card rounded-xl border border-border shadow-xl z-50 overflow-hidden"
-                >
-                  <div className="px-4 py-3 border-b border-border">
-                    <p className="text-xs text-muted-foreground">Conectado como</p>
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {profile?.email}
-                    </p>
-                  </div>
-
-                  <div className="p-1.5">
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        router.push("/settings");
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors text-left"
-                    >
-                      <User className="w-4 h-4" />
-                      Perfil
-                    </button>
-
-                    <button
-                      id="topbar-logout"
-                      role="menuitem"
-                      onClick={handleLogout}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-colors text-left"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      Sair
-                    </button>
-                  </div>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
         </div>
-      </div>
-      <MagicAddModal open={magicOpen} onClose={() => setMagicOpen(false)} projects={projects} />
-    </header>
+
+        <div className="flex items-center gap-2">
+          {onOpenChat && (
+            <button
+              onClick={onOpenChat}
+              title="Assistente IA"
+              className="w-9 h-9 rounded-md hover:bg-accent flex items-center justify-center transition-colors text-primary relative"
+            >
+              <Sparkles className="w-4 h-4" />
+            </button>
+          )}
+
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button
+                title="Notificações"
+                className="w-9 h-9 rounded-md hover:bg-accent flex items-center justify-center transition-colors text-muted-foreground hover:text-foreground relative"
+              >
+                <Bell className="w-4 h-4" />
+                {notifications.length > 0 && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full ring-2 ring-background" />
+                )}
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" className="w-80 bg-surface border border-border rounded-lg shadow-lg p-2 z-50">
+                <div className="px-2 py-1.5 mb-1 border-b border-border">
+                  <span className="text-xs font-medium text-muted-foreground">Notificações</span>
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-muted-foreground">
+                    Sem novas notificações
+                  </div>
+                ) : (
+                  notifications.map(n => (
+                    <DropdownMenu.Item key={n.id} className="text-xs p-2 hover:bg-accent outline-none cursor-pointer rounded-md">
+                      {n.title}
+                    </DropdownMenu.Item>
+                  ))
+                )}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+
+          <ThemeToggle />
+
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center text-xs font-semibold ml-2 hover:bg-primary/20 transition-colors">
+                {initials}
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" className="w-48 bg-surface border border-border rounded-lg shadow-lg p-1 z-50">
+                <div className="px-2 py-1.5 mb-1 border-b border-border">
+                  <p className="text-sm font-medium text-foreground truncate">{profile?.full_name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{profile?.email}</p>
+                </div>
+                <DropdownMenu.Item className="flex items-center gap-2 px-2 py-1.5 text-sm outline-none cursor-pointer hover:bg-accent rounded-md">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  Perfil
+                </DropdownMenu.Item>
+                <DropdownMenu.Item 
+                  onSelect={handleLogout}
+                  className="flex items-center gap-2 px-2 py-1.5 text-sm outline-none cursor-pointer text-destructive hover:bg-destructive/10 rounded-md"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sair
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </div>
+      </header>
+      
+      <CommandPalette open={cmdOpen} setOpen={setCmdOpen} />
+    </>
   );
 }

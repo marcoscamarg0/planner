@@ -333,14 +333,48 @@ export async function executeAutomation(
     await job.updateProgress(90);
     const htmlContent = buildReportHtml({ results, axeViolations, targetUrl, jobName });
 
-    const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
-    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+    // Import do Supabase no topo ou no escopo
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     const htmlFilename = `report-${jobId}.html`;
-    const htmlPath = path.join(reportsDir, htmlFilename);
-    fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
+    let htmlReportUrl = '';
+
+    try {
+      const { data, error: htmlErr } = await supabase.storage.from('reports').upload(htmlFilename, htmlContent, { contentType: 'text/html', upsert: true });
+      if (htmlErr) throw htmlErr;
+      htmlReportUrl = supabase.storage.from('reports').getPublicUrl(htmlFilename).data.publicUrl;
+      await job.log('[Executor] Relatório HTML salvo na nuvem.');
+    } catch (err) {
+      await job.log('[Executor] Falha no upload HTML, salvando local: ' + String(err));
+      const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
+      if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+      const htmlPath = path.join(reportsDir, htmlFilename);
+      fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
+      htmlReportUrl = `/reports/${htmlFilename}`;
+    }
 
     let pdfUrl: string | undefined;
+
+    try {
+      await job.log('[Executor] Gerando e fazendo upload do PDF...');
+      const pdfBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+      const pdfPage = await pdfBrowser.newPage();
+      await pdfPage.setContent(htmlContent, { waitUntil: 'networkidle', timeout: 30000 });
+      const pdfFilename = `report-${jobId}.pdf`;
+      const pdfBuffer = await pdfPage.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
+      await pdfBrowser.close();
+
+      const { error: pdfErr } = await supabase.storage.from('reports').upload(pdfFilename, pdfBuffer, { contentType: 'application/pdf', upsert: true });
+      if (pdfErr) throw pdfErr;
+
+      pdfUrl = supabase.storage.from('reports').getPublicUrl(pdfFilename).data.publicUrl;
+      await job.log('[Executor] PDF salvo com sucesso no Supabase Storage.');
+    } catch (pdfErr) {
+      await job.log('[Executor] Erro ao gerar/upload PDF: ' + String(pdfErr));
+    }
 
     await context.close();
 
@@ -353,7 +387,7 @@ export async function executeAutomation(
       status: 'completed',
       progress: 100,
       pdfUrl,
-      htmlReportUrl: `/reports/${htmlFilename}`,
+      htmlReportUrl,
       steps: results,
       axeViolationsCount: axeViolations.length,
       totalSteps: results.length,

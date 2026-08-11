@@ -18,9 +18,11 @@ interface ProjectCardProps {
   subProjects?: ProjectWithStats[];
   index?: number;
   currentUserId?: string;
+  isSelected?: boolean;
+  onToggleSelect?: (projectId: string) => void;
 }
 
-export function ProjectCard({ project, subProjects = [], index = 0, currentUserId }: ProjectCardProps) {
+export function ProjectCard({ project, subProjects = [], index = 0, currentUserId, isSelected, onToggleSelect }: ProjectCardProps) {
   const progressRate =
     project.total_tasks > 0
       ? Math.round((project.completed_tasks / project.total_tasks) * 100)
@@ -60,10 +62,23 @@ export function ProjectCard({ project, subProjects = [], index = 0, currentUserI
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.06 }}
-      className="bg-card border border-border shadow-sm hover:shadow-md hover:border-border/80 rounded-2xl p-5 group cursor-pointer transition-all duration-300"
+      className={cn(
+        "bg-card border shadow-sm hover:shadow-md rounded-2xl p-5 group transition-all duration-300 relative",
+        isSelected ? "border-primary ring-1 ring-primary" : "border-border hover:border-border/80"
+      )}
       aria-label={`Projeto: ${project.title}`}
     >
-      <Link href={`/projects/${project.id}`} className="block space-y-4">
+      {onToggleSelect && (
+        <div className="absolute top-4 left-4 z-20">
+          <input
+            type="checkbox"
+            checked={isSelected || false}
+            onChange={() => onToggleSelect(project.id)}
+            className="w-4 h-4 rounded-sm border-primary/50 text-primary focus:ring-primary/50 cursor-pointer bg-background"
+          />
+        </div>
+      )}
+      <Link href={`/projects/${project.id}`} className={cn("block space-y-4", onToggleSelect && "pl-6")}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             <div

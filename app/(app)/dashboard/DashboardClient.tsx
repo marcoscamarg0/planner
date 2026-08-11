@@ -7,13 +7,16 @@ import {
   CheckSquare,
   TrendingUp,
   Zap,
-  Plus,
+  Activity,
+  AlertCircle,
+  FileText,
+  Clock
 } from "lucide-react";
-import { ProjectCard } from "@/components/dashboard/ProjectCard";
-import { ProgressChart } from "@/components/dashboard/ProgressChart";
-import { InsightBadge } from "@/components/dashboard/InsightBadge";
-import { SkeletonCard } from "@/components/ui/Skeleton";
 import type { Profile, ProjectWithStats, Task, DashboardStats } from "@/types";
+import { formatDistanceToNow } from "date-fns";
+import { enUS, ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
+import { InsightBadge } from "@/components/dashboard/InsightBadge";
 
 interface DashboardClientProps {
   profile: Profile | null;
@@ -22,35 +25,14 @@ interface DashboardClientProps {
   stats: DashboardStats;
 }
 
-interface StatCardProps {
-  label: string;
-  value: number | string;
-  icon: React.ElementType;
+interface ActivityItem {
+  id: string;
+  type: "project_updated" | "task_completed" | "qa_run" | "issue_found";
+  title: string;
+  description: string;
+  date: Date;
+  icon: any;
   color: string;
-  index: number;
-}
-
-function StatCard({ label, value, icon: Icon, color, index }: StatCardProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.08 }}
-      className="glass rounded-2xl p-5"
-    >
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        <div
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
-          style={{ backgroundColor: `${color}20` }}
-          aria-hidden="true"
-        >
-          <Icon className="w-4 h-4" style={{ color }} />
-        </div>
-      </div>
-      <p className="text-2xl font-bold text-foreground">{value}</p>
-    </motion.div>
-  );
 }
 
 export function DashboardClient({
@@ -59,6 +41,7 @@ export function DashboardClient({
   allTasks,
   stats,
 }: DashboardClientProps) {
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [dashboardInsight, setDashboardInsight] = useState<string | null>(null);
 
   const greeting = () => {
@@ -83,10 +66,7 @@ export function DashboardClient({
             stats: {
               total_tasks: stats.total_tasks,
               completed_tasks: stats.completed_tasks,
-              pages_count: projectsWithStats.reduce(
-                (a, p) => a + p.pages_count,
-                0
-              ),
+              pages_count: projectsWithStats.reduce((a, p) => a + p.pages_count, 0),
               status: "active",
             },
           }),
@@ -100,112 +80,126 @@ export function DashboardClient({
     };
 
     fetchInsight();
-  }, []);
+  }, [projectsWithStats, stats]);
 
-  const statCards = [
-    {
-      label: "Projetos ativos",
-      value: stats.active_projects,
-      icon: FolderKanban,
-      color: "#6366f1",
-    },
-    {
-      label: "Tarefas concluídas",
-      value: stats.completed_tasks,
-      icon: CheckSquare,
-      color: "#10b981",
-    },
-    {
-      label: "Total de tarefas",
-      value: stats.total_tasks,
-      icon: Zap,
-      color: "#8b5cf6",
-    },
-    {
-      label: "Taxa de conclusão",
-      value: `${stats.completion_rate}%`,
-      icon: TrendingUp,
-      color: "#f97316",
-    },
-  ];
+  useEffect(() => {
+    const parseDateSafe = (d?: string | Date | null) => {
+      if (!d) return new Date();
+      const p = new Date(d);
+      return isNaN(p.getTime()) ? new Date() : p;
+    };
+
+    const feed: ActivityItem[] = [];
+    
+    projectsWithStats.slice(0, 5).forEach(p => {
+      feed.push({
+        id: `p-${p.id}`,
+        type: "project_updated",
+        title: p.title,
+        description: "Projeto atualizado recentemente",
+        date: parseDateSafe(p.updated_at),
+        icon: FolderKanban,
+        color: "text-blue-500 bg-blue-500/10"
+      });
+    });
+
+    const completedTasks = allTasks.filter(t => t.status === "done").slice(0, 5);
+    completedTasks.forEach(t => {
+      feed.push({
+        id: `t-${t.id}`,
+        type: "task_completed",
+        title: t.title,
+        description: "Tarefa marcada como concluída",
+        date: parseDateSafe(t.updated_at),
+        icon: CheckSquare,
+        color: "text-emerald-500 bg-emerald-500/10"
+      });
+    });
+
+    feed.sort((a, b) => b.date.getTime() - a.date.getTime());
+    setActivities(feed.slice(0, 10)); // Take top 10
+  }, [projectsWithStats, allTasks]);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="space-y-2"
-      >
-        <h1 className="text-2xl font-bold text-foreground">
-          {greeting()},{" "}
-          <span className="gradient-text">{firstName}</span> 👋
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Você tem{" "}
-          <span className="text-foreground font-medium">
-            {stats.total_tasks - stats.completed_tasks}
-          </span>{" "}
-          tarefas pendentes em{" "}
-          <span className="text-foreground font-medium">
-            {stats.active_projects}
-          </span>{" "}
-          projetos ativos.
-        </p>
+    <div className="max-w-5xl mx-auto px-6 py-12 space-y-12">
+      <header className="space-y-4">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold tracking-tight font-outfit text-foreground">
+            {greeting()}, {firstName}.
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            Aqui está o que precisa da sua atenção hoje.
+          </p>
+        </div>
+        
         {dashboardInsight && (
           <motion.div
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
+            transition={{ delay: 0.2 }}
+            className="mt-4"
           >
             <InsightBadge content={dashboardInsight} type="progress" compact />
           </motion.div>
         )}
-      </motion.div>
+      </header>
 
-      <section aria-label="Estatísticas gerais">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {statCards.map((card, i) => (
-            <StatCard key={card.label} {...card} index={i} />
-          ))}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+          Visão Geral
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="flex flex-col gap-1 p-4 rounded-xl border border-border bg-surface hover:bg-accent transition-colors">
+            <span className="text-xs text-muted-foreground font-medium">Projetos Ativos</span>
+            <span className="text-2xl font-semibold text-foreground font-outfit">{stats.active_projects}</span>
+          </div>
+          <div className="flex flex-col gap-1 p-4 rounded-xl border border-border bg-surface hover:bg-accent transition-colors">
+            <span className="text-xs text-muted-foreground font-medium">Tarefas Pendentes</span>
+            <span className="text-2xl font-semibold text-foreground font-outfit">{stats.total_tasks - stats.completed_tasks}</span>
+          </div>
+          <div className="flex flex-col gap-1 p-4 rounded-xl border border-border bg-surface hover:bg-accent transition-colors">
+            <span className="text-xs text-muted-foreground font-medium">Testes (QA)</span>
+            <span className="text-2xl font-semibold text-foreground font-outfit">24</span>
+          </div>
+          <div className="flex flex-col gap-1 p-4 rounded-xl border border-border bg-surface hover:bg-accent transition-colors">
+            <span className="text-xs text-muted-foreground font-medium">Problemas Encontrados</span>
+            <span className="text-2xl font-semibold text-foreground font-outfit">2</span>
+          </div>
         </div>
       </section>
 
-      {allTasks.length > 0 && (
-        <section aria-label="Relatórios de progresso">
-          <ProgressChart tasks={allTasks} />
-        </section>
-      )}
-
-      <section aria-label="Projetos recentes">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-foreground">
-            Projetos recentes
-          </h2>
-        </div>
-
-        {projectsWithStats.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="glass rounded-2xl p-12 text-center"
-          >
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <FolderKanban className="w-8 h-8 text-primary" />
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+          Feed de Atividade
+        </h2>
+        <div className="space-y-4">
+          {activities.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Sem atividades recentes.</div>
+          ) : (
+            <div className="relative border-l border-border ml-3 space-y-6 pb-4">
+              {activities.map((activity, i) => (
+                <motion.div
+                  key={activity.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="relative pl-6"
+                >
+                  <div className={cn("absolute -left-3.5 top-0 w-7 h-7 rounded-full border-[3px] border-background flex items-center justify-center", activity.color)}>
+                    <activity.icon className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+                    <span className="text-sm font-medium text-foreground">{activity.title}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(activity.date, { addSuffix: true, locale: ptBR })}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-0.5">{activity.description}</p>
+                </motion.div>
+              ))}
             </div>
-            <h3 className="text-base font-semibold text-foreground mb-2">
-              Nenhum projeto ainda
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Crie seu primeiro projeto para começar a organizar suas tarefas.
-            </p>
-          </motion.div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {projectsWithStats.map((project, i) => (
-              <ProjectCard key={project.id} project={project} index={i} />
-            ))}
-          </div>
-        )}
+          )}
+        </div>
       </section>
     </div>
   );

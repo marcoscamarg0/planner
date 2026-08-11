@@ -75,8 +75,37 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
         console.warn(`[QA API] Model ${model} failed (${isAbort ? "timeout" : "provider error " + err.status}), trying next fallback...`);
         continue; // try next model
       }
-      // For non-retryable errors (like 401 Unauthorized), don't retry different models
-      throw err;
+      // For non-retryable errors (like 401 Unauthorized), don't retry different models on OpenRouter, just break and try Groq
+      break;
+    }
+  }
+
+  // Fallback para Groq se OpenRouter falhar completamente
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      console.log("[QA API] OpenRouter falhou completamente. Tentando Groq fallback (llama-3.3-70b-versatile)...");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 40000);
+      
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Authorization": "Bearer " + groqKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages, temperature: 0.2, max_tokens: 8000 }),
+      }).finally(() => clearTimeout(timeoutId));
+      
+      if (!response.ok) {
+        throw new Error("Groq API Error: " + response.status);
+      }
+      const data = await response.json();
+      return data.choices[0]?.message?.content || "";
+    } catch (groqErr: any) {
+      console.error("[QA API] Groq Fallback Error:", groqErr.message);
+      lastError = groqErr;
     }
   }
 
@@ -96,7 +125,7 @@ export async function GET(req: Request) {
 
     let query = supabase
       .from("qa_reports")
-      .select("id, user_id, project_id, type, title, framework, model_used, input_description, result_json, created_at")
+      .select("id, user_id, project_id, type, title, framework, model_used, result_raw, result_json, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);

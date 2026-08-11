@@ -206,26 +206,35 @@ export function ProjectEditorClient({
   const latestInsight = insights[0];
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full bg-background overflow-hidden">
       <aside
-        className="w-56 border-r border-border bg-card/50 flex flex-col hidden lg:flex"
-        aria-label="Páginas do projeto"
+        className="w-64 border-r border-border bg-surface/50 flex-col hidden lg:flex"
+        aria-label="Navegação do projeto"
       >
-        <div className="px-4 py-3 border-b border-border flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <span className="text-lg shrink-0">{project.emoji ?? "📁"}</span>
-              <h2 className="text-sm font-semibold text-foreground truncate">
-                {project.title}
-              </h2>
+        <div className="px-5 py-6 border-b border-border/50">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 text-primary shadow-sm border border-primary/20">
+                <span className="text-lg">{project.emoji ?? "📁"}</span>
+              </div>
+              <div className="flex flex-col min-w-0">
+                <h2 className="text-sm font-semibold text-foreground truncate font-outfit">
+                  {project.title}
+                </h2>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                  Workspace
+                </span>
+              </div>
             </div>
+            
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={handleExportPDF}
-                className="w-6 h-6 rounded flex items-center justify-center text-primary hover:text-primary hover:bg-primary/10 transition-colors"
+                className="flex-1 h-8 rounded-lg flex items-center justify-center gap-2 text-xs font-medium text-muted-foreground bg-accent/50 hover:text-foreground hover:bg-accent transition-colors border border-transparent hover:border-border/50"
                 title="Exportar Relatório em PDF"
               >
                 <Download className="w-3.5 h-3.5" />
+                Exportar
               </button>
               <button
                 onClick={() => {
@@ -237,8 +246,8 @@ export function ProjectEditorClient({
                     });
                   }
                 }}
-                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                title="Renomear Projeto"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground bg-accent/50 hover:text-foreground hover:bg-accent transition-colors border border-transparent hover:border-border/50"
+                title="Configurações"
               >
                 <FileText className="w-3.5 h-3.5" />
               </button>
@@ -250,7 +259,7 @@ export function ProjectEditorClient({
                     router.push("/dashboard");
                   }
                 }}
-                className="w-6 h-6 rounded flex items-center justify-center text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-rose-500 bg-rose-500/5 hover:text-rose-400 hover:bg-rose-500/10 transition-colors border border-transparent hover:border-rose-500/20"
                 title="Apagar Projeto"
               >
                 <X className="w-3.5 h-3.5" />
@@ -259,66 +268,70 @@ export function ProjectEditorClient({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
-          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
-            <span className="text-xs text-muted-foreground font-medium">Páginas</span>
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          <div className="flex items-center justify-between px-2 py-1.5 mb-2">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+              Páginas
+            </span>
             <button
               id="new-page-btn"
               onClick={createPage}
               aria-label="Nova página"
-              className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              className="w-5 h-5 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             >
-              <Plus className="w-3 h-3" />
+              <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <AnimatePresence>
-            {pages.map((page) => (
-              <motion.div
-                key={page.id}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -8 }}
-                className="group relative"
-              >
-                <button
-                  onClick={() => setSelectedPage(page)}
-                  className={cn(
-                    "w-full flex items-center justify-between gap-2 px-2 py-2 rounded-lg text-left text-xs transition-all",
-                    selectedPage?.id === page.id
-                      ? "bg-primary/15 text-foreground pr-8"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent pr-8"
-                  )}
-                  aria-current={selectedPage?.id === page.id ? "page" : undefined}
+          <div className="space-y-0.5">
+            <AnimatePresence>
+              {pages.map((page) => (
+                <motion.div
+                  key={page.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8 }}
+                  className="group relative"
                 >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <FileText className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{page.title}</span>
-                  </div>
-                </button>
-                <button
-                  onClick={(e) => deletePage(page.id, e)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-all z-10"
-                  title="Apagar página"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+                  <button
+                    onClick={() => setSelectedPage(page)}
+                    className={cn(
+                      "w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left text-sm transition-all",
+                      selectedPage?.id === page.id
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                    )}
+                    aria-current={selectedPage?.id === page.id ? "page" : undefined}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <FileText className="w-4 h-4 shrink-0 opacity-70" aria-hidden="true" />
+                      <span className="truncate">{page.title || "Sem título"}</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={(e) => deletePage(page.id, e)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-all z-10"
+                    title="Apagar página"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </motion.div>
+              ))}
+            </AnimatePresence>
 
-          {pages.length === 0 && (
-            <button
-              onClick={createPage}
-              className="w-full text-center py-8 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              + Nova página
-            </button>
-          )}
+            {pages.length === 0 && (
+              <button
+                onClick={createPage}
+                className="w-full text-center py-6 text-xs text-muted-foreground border border-dashed border-border rounded-lg hover:border-primary/50 hover:text-primary transition-colors mt-2"
+              >
+                + Nova página
+              </button>
+            )}
+          </div>
         </div>
 
         {latestInsight && (
-          <div className="p-3 border-t border-border">
+          <div className="p-4 border-t border-border/50 bg-accent/30">
             <InsightBadge
               content={latestInsight.content}
               type={latestInsight.type}
@@ -328,125 +341,152 @@ export function ProjectEditorClient({
         )}
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="border-b border-border bg-card/80 px-4 flex items-center justify-between h-12 gap-4">
-          <div className="flex items-center gap-1">
+      <div className="flex-1 flex flex-col min-w-0 bg-background">
+        <div className="border-b border-border/50 bg-surface/50 px-6 pt-3 flex items-end gap-6 overflow-x-auto no-scrollbar relative z-10">
+          <div className="flex items-center gap-6">
             <button
               id="tab-editor"
               onClick={() => setTab("editor")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "editor"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "editor"}
             >
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-4 h-4" />
               Editor
+              {tab === "editor" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-tasks"
               onClick={() => setTab("tasks")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "tasks"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "tasks"}
             >
-              <CheckSquare className="w-3.5 h-3.5" />
+              <CheckSquare className="w-4 h-4" />
               Tarefas
               {tasks.filter((t) => t.status !== "done").length > 0 && (
-                <span className="bg-primary/20 text-primary rounded-full px-1.5 py-0.5 text-[10px] font-bold">
+                <span className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-bold",
+                  tab === "tasks" ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"
+                )}>
                   {tasks.filter((t) => t.status !== "done").length}
                 </span>
+              )}
+              {tab === "tasks" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
               )}
             </button>
             <button
               id="tab-flow"
               onClick={() => setTab("flow")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "flow"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "flow"}
             >
-              <Network className="w-3.5 h-3.5" />
+              <Network className="w-4 h-4" />
               Fluxo
+              {tab === "flow" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-flow-spreadsheet"
               onClick={() => setTab("flow_spreadsheet")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "flow_spreadsheet"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "flow_spreadsheet"}
             >
-              <Table2 className="w-3.5 h-3.5" />
+              <Table2 className="w-4 h-4" />
               Planilha
+              {tab === "flow_spreadsheet" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-smart_runner"
               onClick={() => setTab("smart_runner")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "smart_runner"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "smart_runner"}
             >
-              <Zap className="w-3.5 h-3.5" />
+              <Zap className="w-4 h-4" />
               Runner IA
+              {tab === "smart_runner" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-batch_runner"
               onClick={() => setTab("batch_runner")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "batch_runner"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "batch_runner"}
             >
-              <ListTree className="w-3.5 h-3.5" />
+              <ListTree className="w-4 h-4" />
               Lote / Fila
+              {tab === "batch_runner" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-test_cases"
               onClick={() => setTab("test_cases")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "test_cases"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "test_cases"}
             >
-              <FlaskConical className="w-3.5 h-3.5" />
+              <FlaskConical className="w-4 h-4" />
               Casos de Teste
+              {tab === "test_cases" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-reports"
               onClick={() => setTab("reports")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                "flex items-center gap-2 pb-3 text-[13px] font-medium transition-all relative",
                 tab === "reports"
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={tab === "reports"}
             >
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-4 h-4" />
               Relatórios QA
+              {tab === "reports" && (
+                <motion.div layoutId="active-tab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full" />
+              )}
             </button>
             <button
               id="tab-report"
@@ -458,7 +498,7 @@ export function ProjectEditorClient({
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pb-3">
             <AnimatePresence>
               {saveState === "saving" && (
                 <motion.span

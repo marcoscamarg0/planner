@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Loader2, Download, Table2, CheckCircle2, AlertCircle, FileText, Calendar, Sparkles, Edit2, Check, X } from "lucide-react";
+import { Loader2, Download, Table2, CheckCircle2, AlertCircle, FileText, Calendar, Sparkles, Edit2, Check, X, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface QaResultsSpreadsheetTabProps {
@@ -25,6 +25,8 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
   const [generatingSummaryFor, setGeneratingSummaryFor] = useState<string | null>(null);
   const [editingSummaryFor, setEditingSummaryFor] = useState<string | null>(null);
   const [editedSummary, setEditedSummary] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -32,7 +34,7 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
       const supabase = createClient();
       const { data } = await supabase
         .from("qa_reports")
-        .select("*")
+        .select("id, type, title, result_raw, result_json, created_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false });
 
@@ -76,6 +78,51 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
 
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateProgress, setGenerateProgress] = useState({ current: 0, total: 0 });
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Tem certeza que deseja apagar este relatório?")) return;
+    
+    setReports(prev => prev.filter(r => r.id !== id));
+    
+    const supabase = createClient();
+    await supabase.from("qa_reports").delete().eq("id", id);
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === sortedReports.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(sortedReports.map(r => r.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Tem certeza que deseja apagar ${selectedIds.size} relatórios selecionados?`)) return;
+    
+    setIsDeletingBulk(true);
+    const idsToDelete = Array.from(selectedIds);
+    
+    // Optimistic update
+    setReports(prev => prev.filter(r => !idsToDelete.includes(r.id)));
+    setSelectedIds(new Set());
+    
+    const supabase = createClient();
+    await supabase.from("qa_reports").delete().in("id", idsToDelete);
+    setIsDeletingBulk(false);
+  };
 
   const handleEditStart = (report: QaReport) => {
     setEditingSummaryFor(report.id);
@@ -134,6 +181,12 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
     
     for (const report of toGenerate) {
       setGenerateProgress({ current: count + 1, total: toGenerate.length });
+      
+      // Pausa inteligente de 4 segundos entre requisições para evitar erro 429 de Rate Limit (OpenRouter/Groq)
+      if (count > 0) {
+        await new Promise(resolve => setTimeout(resolve, 4000));
+      }
+
       try {
         const res = await fetch("/api/ai/qa", {
           method: "POST",
@@ -252,6 +305,16 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={isDeletingBulk}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-colors shadow-sm disabled:opacity-50"
+            >
+              {isDeletingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              {isDeletingBulk ? "Apagando..." : `Apagar Selecionados (${selectedIds.size})`}
+            </button>
+          )}
           {reports.filter(r => !r.result_json?.summary).length > 0 && (
             <button
               onClick={handleGenerateAllSummaries}
@@ -277,6 +340,14 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
           <table className="w-full text-left text-sm">
             <thead className="bg-muted/50 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
+                <th className="px-4 py-3 font-medium w-10">
+                  <input 
+                    type="checkbox" 
+                    checked={sortedReports.length > 0 && selectedIds.size === sortedReports.length}
+                    onChange={handleSelectAll}
+                    className="rounded border-muted-foreground/30 text-emerald-500 focus:ring-emerald-500 cursor-pointer"
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium w-40">Data da Execução</th>
                 <th className="px-4 py-3 font-medium w-36">Tipo de Teste</th>
                 <th className="px-4 py-3 font-medium w-48">Link Testado</th>
@@ -289,9 +360,18 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
               {sortedReports.map((report) => {
                 const statusInfo = getStatusInfo(report);
                 const isJson = !!report.result_json;
+                const isSelected = selectedIds.has(report.id);
                 
                 return (
-                  <tr key={report.id} className="hover:bg-muted/30 transition-colors group">
+                  <tr key={report.id} className={cn("hover:bg-muted/30 transition-colors group", isSelected && "bg-emerald-500/5 hover:bg-emerald-500/10")}>
+                    <td className="px-4 py-3">
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        onChange={() => handleToggleSelect(report.id)}
+                        className="rounded border-muted-foreground/30 text-emerald-500 focus:ring-emerald-500 cursor-pointer"
+                      />
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap flex items-center gap-2">
                       <Calendar className="w-3.5 h-3.5 opacity-50" />
                       {new Date(report.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
@@ -373,6 +453,13 @@ export function QaResultsSpreadsheetTab({ projectId, targetUrl }: QaResultsSprea
                               title="Editar Manualmente"
                             >
                               <Edit2 className="w-3 h-3" /> Editar
+                            </button>
+                            <button
+                              onClick={() => handleDelete(report.id)}
+                              className="self-start text-[10px] uppercase font-bold text-muted-foreground hover:text-rose-500 transition-colors flex items-center gap-1 opacity-0 group-hover:opacity-100"
+                              title="Apagar Relatório"
+                            >
+                              <Trash2 className="w-3 h-3" /> Apagar
                             </button>
                           </div>
                         </div>

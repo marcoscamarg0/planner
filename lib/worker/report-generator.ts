@@ -26,12 +26,12 @@ interface ReportOptions {
 
 function getStatusInfo(status: StatusBotao) {
   switch (status) {
-    case 'aprovado':     return { cor: '#10b981', bg: '#ecfdf5', texto: 'Aprovado',    icon: '✓' };
-    case 'falha_clique': return { cor: '#f59e0b', bg: '#fffbeb', texto: 'Falha Ação',  icon: '⚡' };
-    case 'erro_js':      return { cor: '#ef4444', bg: '#fef2f2', texto: 'Erro JS',     icon: '✖' };
-    case 'sem_texto':    return { cor: '#ef4444', bg: '#fef2f2', texto: 'S/ Texto',    icon: '⚠' };
-    case 'pulado':       return { cor: '#6b7280', bg: '#f3f4f6', texto: 'Pulado',      icon: '⊘' };
-    default:             return { cor: '#6b7280', bg: '#f3f4f6', texto: status,         icon: '?' };
+    case 'aprovado':     return { cor: '#168821', bg: '#e3f5e1', texto: 'Aprovado',    icon: '✓' };
+    case 'falha_clique': return { cor: '#C2850C', bg: '#FFF5C2', texto: 'Falha Ação',  icon: '⚡' };
+    case 'erro_js':      return { cor: '#E52207', bg: '#fde8e8', texto: 'Erro JS',     icon: '✖' };
+    case 'sem_texto':    return { cor: '#E52207', bg: '#fde8e8', texto: 'S/ Texto',    icon: '⚠' };
+    case 'pulado':       return { cor: '#888888', bg: '#F3F3F3', texto: 'Pulado',      icon: '⊘' };
+    default:             return { cor: '#888888', bg: '#F3F3F3', texto: status,         icon: '?' };
   }
 }
 
@@ -303,95 +303,93 @@ export function buildReportHtml(opts: ReportOptions): string {
                 .replace('Element has no alt attribute', 'Falta atributo alt');
               return `
               <div class="axe-node">
-                <code>${node.html.replace(/</g, '&lt;').replace(/>/g, '&gt;').substring(0, 200)}...</code>
-                <div class="justificativa"><strong>Justificativa eMAG:</strong><br>${summary.replace(/\n/g, '<br>')}</div>
+                <code>${node.html.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>
+                <p class="axe-summary">${summary}</p>
               </div>`;
             }).join('')}
-            ${v.nodes.length > 3 ? `<em>...e mais ${v.nodes.length - 3} elemento(s) não exibido(s).</em>` : ''}
+            ${v.nodes.length > 3 ? `<p class="axe-more">+ ${v.nodes.length - 3} elementos similares encontrados</p>` : ''}
           </div>
         </div>`;
       }).join('');
 
   return `<!DOCTYPE html>
-<html lang="pt-BR">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>Caso de Teste — ${jobName}</title>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<title>Relatório Smart — ${jobName}</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 *{box-sizing:border-box}
-body{font-family:'Inter',sans-serif;color:#334155;margin:0;padding:0;background:#f1f5f9}
-.page{padding:50px 60px;max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 6px -1px rgba(0,0,0,.1)}
+body{font-family:'Inter',sans-serif;color:#0f172a;margin:0;padding:0;background:#f8fafc}
+.page{padding:50px 60px;max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 6px -1px rgba(0,0,0,.05),0 2px 4px -2px rgba(0,0,0,.05)}
 h1,h2,h3,h4{font-family:'Outfit',sans-serif;color:#0f172a}
-code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px}
+code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;padding:2px 6px;border-radius:4px;color:#3b82f6}
 
-/* Cover */
-.cover{min-height:1040px;display:flex;flex-direction:column;justify-content:center;page-break-after:always}
-.cover-logo{font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:#3b82f6;margin-bottom:24px;display:inline-block;border-bottom:2px solid #3b82f6;padding-bottom:6px}
-.cover h1{font-size:48px;line-height:1.1;margin:0 0 10px;letter-spacing:-1.5px}
-.cover-sub{font-size:18px;color:#64748b;font-weight:400;margin:0 0 36px}
-.info-box{background:#f8fafc;border-left:4px solid #3b82f6;padding:20px 24px;border-radius:8px;margin-bottom:32px}
-.info-box p{margin:6px 0;font-size:14px}
-.info-box.success{border-left-color:#10b981;background:#ecfdf5}
+/* Cover Premium */
+.cover{min-height:900px;display:flex;flex-direction:column;justify-content:center;page-break-after:always}
+.cover-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#fff;background:linear-gradient(135deg,#3b82f6,#8b5cf6);margin-bottom:24px;padding:6px 14px;border-radius:99px;box-shadow:0 2px 4px rgba(59,130,246,.2)}
+.cover h1{font-size:48px;line-height:1.1;margin:0 0 16px;letter-spacing:-1px;font-weight:800}
+.cover-sub{font-size:18px;color:#64748b;font-weight:400;margin:0 0 40px}
+.info-box{background:#f8fafc;border:1px solid #e2e8f0;padding:24px;border-radius:12px;margin-bottom:32px;box-shadow:inset 0 2px 4px rgba(0,0,0,.02)}
+.info-box p{margin:8px 0;font-size:14px;color:#334155}
+.info-box.success{border:1px solid #10b981;background:#f0fdf4}
 
 /* Summary cards */
-.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px}
-.summary-card{padding:24px 16px;border-radius:14px;border:1px solid #e2e8f0;text-align:center}
-.summary-card h3{margin:0;font-size:40px;font-weight:800}
-.summary-card p{margin:8px 0 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b}
-.c-blue h3{color:#2563eb}.c-green h3{color:#059669}.c-red h3{color:#e11d48}.c-purple h3{color:#7c3aed}
+.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:40px}
+.summary-card{padding:24px 16px;border-radius:12px;border:1px solid #e2e8f0;text-align:center;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05);transition:transform .2s}
+.summary-card h3{margin:0;font-size:40px;font-weight:800;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.summary-card p{margin:8px 0 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#64748b}
+.c-blue h3{background-image:linear-gradient(135deg,#3b82f6,#2563eb)}.c-green h3{background-image:linear-gradient(135deg,#10b981,#059669)}.c-red h3{background-image:linear-gradient(135deg,#ef4444,#dc2626)}.c-purple h3{background-image:linear-gradient(135deg,#8b5cf6,#7c3aed)}
 
-/* Pre-conditions */
-.pre-cond{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:20px 24px;margin-bottom:32px}
-.pre-cond h3{margin:0 0 12px;font-size:16px;color:#1d4ed8}
-.pre-cond ul{margin:0;padding-left:18px;color:#1e3a5f;font-size:14px;line-height:1.8}
+/* Sections */
+.pre-cond{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;margin-bottom:32px;box-shadow:0 1px 3px rgba(0,0,0,.02)}
+.pre-cond h3{margin:0 0 12px;font-size:16px;color:#3b82f6}
+.pre-cond ul{margin:0;padding-left:20px;color:#475569;font-size:14px;line-height:1.6}
 
-/* Recommendations */
-.recommendation-panel{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:24px;margin-bottom:36px}
-.recommendation-panel h3{margin:0 0 14px;color:#b45309;font-size:18px}
-.rec-list{margin:0;padding-left:18px;color:#92400e;font-size:14px;line-height:1.7}
+.recommendation-panel{background:#fff;border:1px solid #e2e8f0;border-left:4px solid #f59e0b;border-radius:12px;padding:24px;margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,.02)}
+.recommendation-panel h3{margin:0 0 12px;color:#d97706;font-size:16px}
+.rec-list{margin:0;padding-left:20px;color:#475569;font-size:14px;line-height:1.6}
 
-/* Section title */
-.section-title{font-size:24px;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin:36px 0 20px}
+.section-title{font-size:24px;color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:12px;margin:40px 0 24px;font-weight:700}
 
 /* Axe */
-.axe-violation{border:1px solid #e2e8f0;border-left:5px solid #e11d48;padding:18px 20px;border-radius:10px;margin-bottom:18px}
+.axe-violation{border:1px solid #e2e8f0;padding:20px;border-radius:12px;margin-bottom:16px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.03)}
 .axe-violation h4{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:10px}
-.impact-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;text-transform:uppercase}
-.impact-critical,.impact-serious{background:#fee2e2;color:#991b1b}
-.impact-moderate{background:#fef3c7;color:#92400e}
-.impact-minor{background:#f0fdf4;color:#166534}
-.axe-nodes{background:#f8fafc;padding:12px;border-radius:8px;margin-top:12px}
-.axe-node{margin-bottom:12px;background:#fff;padding:10px;border:1px solid #e5e7eb;border-radius:6px}
-.justificativa{color:#b45309;font-size:12px;margin-top:8px;padding:8px 10px;border-left:3px solid #fbbf24;background:#fef3c7}
+.impact-badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;text-transform:uppercase}
+.impact-critical,.impact-serious{background:#fee2e2;color:#b91c1c}
+.impact-moderate{background:#fef3c7;color:#b45309}
+.impact-minor{background:#dcfce7;color:#15803d}
+.axe-nodes{background:#f8fafc;padding:16px;border-radius:8px;margin-top:16px;border:1px solid #e2e8f0}
+.axe-node{margin-bottom:12px;background:#fff;padding:12px;border:1px solid #e2e8f0;border-radius:6px}
+.justificativa{color:#475569;font-size:13px;margin-top:8px;padding:10px;border-left:3px solid #3b82f6;background:#f1f5f9;border-radius:0 6px 6px 0}
 
 /* Passo card */
-.passo-card{border:1px solid #e2e8f0;border-radius:14px;margin-bottom:28px;page-break-inside:avoid;overflow:hidden}
-.passo-header{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:16px 20px}
-.passo-num-wrap{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.passo-num{font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#64748b}
-.badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700}
-.duration{color:#94a3b8;font-size:11px;font-family:monospace}
-.passo-acao{margin:0;font-size:16px;font-weight:600;color:#0f172a;line-height:1.4}
+.passo-card{border:1px solid #e2e8f0;border-radius:12px;margin-bottom:32px;page-break-inside:avoid;overflow:hidden;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.02)}
+.passo-header{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:20px}
+.passo-num-wrap{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.passo-num{font-family:'Outfit',sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b}
+.badge{padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600}
+.duration{color:#94a3b8;font-size:12px;font-family:monospace}
+.passo-acao{margin:0;font-size:18px;font-weight:600;color:#0f172a;line-height:1.4}
 
 .passo-body{display:flex;flex-direction:column;gap:0}
-.passo-col-info{padding:20px;border-bottom:1px solid #e2e8f0;display:flex;flex-direction:column;gap:16px}
-.passo-col-screenshot{padding:20px;display:flex;flex-direction:column;gap:8px;background:#fafafa}
+.passo-col-info{padding:24px;border-bottom:1px solid #e2e8f0;display:flex;flex-direction:column;gap:20px}
+.passo-col-screenshot{padding:24px;display:flex;flex-direction:column;gap:12px;background:#f8fafc}
 
-.info-bloco{display:flex;flex-direction:column;gap:4px}
-.info-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8}
-.info-text{margin:0;font-size:13px;color:#334155;line-height:1.5}
-.detalhe-mono{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;font-family:monospace;font-size:11px;color:#475569;word-break:break-all}
-.evidencia-bloco{border-top:1px dashed #e2e8f0;padding-top:16px}
-.evidencia-text{background:linear-gradient(135deg,#eff6ff,#f0fdf4);border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;font-size:12px;color:#1e3a5f;line-height:1.6;font-style:italic}
+.info-bloco{display:flex;flex-direction:column;gap:6px}
+.info-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b}
+.info-text{margin:0;font-size:14px;color:#334155;line-height:1.6}
+.detalhe-mono{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:12px;font-family:monospace;font-size:12px;color:#475569;word-break:break-all}
+.evidencia-bloco{border-top:1px dashed #e2e8f0;padding-top:20px}
+.evidencia-text{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px;font-size:14px;color:#1e40af;line-height:1.6;font-style:italic}
 
-.screenshot-wrap{flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border:1px dashed #cbd5e1;border-radius:8px;padding:12px;min-height:120px}
-.evidencia-img{width:100%;max-height:800px;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.15);object-fit:contain}
-.sem-evidencia{color:#94a3b8;font-size:11px;text-align:center;padding:20px}
+.screenshot-wrap{flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;min-height:200px;box-shadow:inset 0 2px 4px rgba(0,0,0,.02)}
+.evidencia-img{width:100%;max-height:800px;border-radius:6px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);object-fit:contain}
+.sem-evidencia{color:#94a3b8;font-size:13px;text-align:center;padding:40px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;width:100%}
 
 /* Footer */
-.footer{text-align:center;padding:32px;font-size:11px;color:#94a3b8;margin-top:40px;border-top:1px solid #e2e8f0}
+.footer{text-align:center;padding:40px 20px;font-size:12px;color:#64748b;margin-top:60px;border-top:1px solid #e2e8f0}
 
 @media print {
   body{background:white !important}
@@ -409,9 +407,9 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
 .top-controls {
   position: sticky;
   top: 0;
-  background: rgba(255,255,255,0.9);
-  backdrop-filter: blur(10px);
-  padding: 12px 24px;
+  background: rgba(255,255,255,0.8);
+  backdrop-filter: blur(12px);
+  padding: 16px 24px;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
   justify-content: flex-end;
@@ -419,20 +417,21 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
   z-index: 999;
 }
 .btn {
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 10px 20px;
+  border-radius: 8px;
   border: none;
   font-family: 'Inter', sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
 }
-.btn-edit { background: #3b82f6; color: white; }
-.btn-edit:hover { background: #2563eb; }
-.btn-print { background: #10b981; color: white; }
-.btn-print:hover { background: #059669; }
-.editing .page { outline: 3px dashed #3b82f6; outline-offset: 5px; }
+.btn-edit { background: #fff; color: #334155; border: 1px solid #e2e8f0; }
+.btn-edit:hover { background: #f8fafc; }
+.btn-print { background: #0f172a; color: white; }
+.btn-print:hover { background: #334155; }
+.editing .page { outline: 4px dashed #3b82f6; outline-offset: 8px; border-radius: 12px; }
 
 /* Charts */
 .chart-container {
@@ -445,16 +444,6 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
   flex-direction: column;
   align-items: center;
 }
-.chart-select {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid #cbd5e1;
-  font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  margin-bottom: 20px;
-  outline: none;
-  cursor: pointer;
-}
 </style>
 </head>
 <body>
@@ -464,55 +453,58 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
 </div>
 
 <div class="page" id="reportPage">
-
   <!-- CAPA -->
   <div class="cover">
-    <span class="cover-logo">Caso de Teste Automatizado</span>
-    <h1>${jobName}</h1>
-    <p class="cover-sub">Execução passo a passo com Evidências Funcionais — eMAG 3.1 / WCAG 2.1 AA</p>
-    <div class="info-box">
-      <p><strong>Página Avaliada:</strong> <a href="${targetUrl}" style="color:#2563eb">${targetUrl}</a></p>
-      <p><strong>Data da Análise:</strong> ${dataHora}</p>
-      <p><strong>Objetivo:</strong> Validar os fluxos de navegação e interação, registrando o estado real do sistema após cada ação.</p>
+    <div>
+      <span class="cover-badge">Planner Smart Report</span>
     </div>
+    <h1>${jobName}</h1>
+    <p class="cover-sub">Execução passo a passo com Evidências Funcionais</p>
+    
+    <div class="info-box">
+      <p><strong>Página Avaliada:</strong> <a href="${targetUrl}" style="color:#3b82f6;text-decoration:none">${targetUrl}</a></p>
+      <p><strong>Data da Análise:</strong> ${dataHora}</p>
+      <p><strong>Objetivo:</strong> Validar os fluxos de navegação e interação estruturalmente.</p>
+    </div>
+    
     <div class="summary-grid">
       <div class="summary-card c-blue"><h3>${total}</h3><p>Passos Executados</p></div>
       <div class="summary-card c-green"><h3>${aprovados}</h3><p>Aprovados</p></div>
       <div class="summary-card c-red"><h3>${falhas}</h3><p>Falhas</p></div>
-      <div class="summary-card c-purple"><h3>${totalAxe}</h3><p>Violações eMAG</p></div>
+      <div class="summary-card c-purple"><h3>${totalAxe}</h3><p>Violações Acess.</p></div>
     </div>
 
     <!-- GRÁFICOS DINÂMICOS -->
     <div class="dashboard-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 40px; page-break-inside: avoid;">
-      <div class="chart-box" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
-        <h3 style="text-align: center; font-size: 14px; margin-top: 0; color: #475569;">Status de Execução dos Passos</h3>
+      <div class="chart-box" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
+        <h3 style="text-align: center; font-size: 15px; margin-top: 0; color: #334155;">Status de Execução</h3>
         <div style="height: 250px; position: relative;"><canvas id="chartPassos"></canvas></div>
       </div>
-      <div class="chart-box" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
-        <h3 style="text-align: center; font-size: 14px; margin-top: 0; color: #475569;">Violações de Acessibilidade (Severidade)</h3>
+      <div class="chart-box" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
+        <h3 style="text-align: center; font-size: 15px; margin-top: 0; color: #334155;">Violações (Severidade)</h3>
         <div style="height: 250px; position: relative;"><canvas id="chartAxe"></canvas></div>
       </div>
     </div>
 
     <!-- PRIORIDADES E PLANO DE AÇÃO -->
     <div class="priorities-panel" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 40px; page-break-inside: avoid;">
-      <h2 style="margin-top: 0; color: #0f172a; font-size: 18px; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px;">Balanço Geral: Plano de Ação e Prioridades</h2>
-      ${axeViolations.length === 0 ? '<p style="color:#10b981;font-weight:600;">✅ Nenhuma ação corretiva técnica necessária no momento.</p>' : `
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px;">
+      <h2 style="margin-top: 0; color: #0f172a; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px;">Balanço Geral & Prioridades</h2>
+      ${axeViolations.length === 0 ? '<p style="color:#10b981;font-weight:600;margin-top:16px">✅ Nenhuma ação corretiva técnica necessária no momento.</p>' : `
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 20px;">
           <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 16px; border-radius: 8px;">
-            <h4 style="color: #991b1b; margin: 0 0 8px; font-size: 13px;">🚨 Prioridade Alta (Crítico/Grave)</h4>
+            <h4 style="color: #991b1b; margin: 0 0 12px; font-size: 13px;">🚨 Prioridade Alta</h4>
             <ul style="margin:0; padding-left: 20px; font-size: 12px; color: #7f1d1d; line-height: 1.6;">
               ${axeViolations.filter(v => v.impact === 'critical' || v.impact === 'serious').map(v => `<li>${v.description}</li>`).join('') || '<li>Nenhuma ocorrência.</li>'}
             </ul>
           </div>
           <div style="background: #fffbeb; border: 1px solid #fde68a; padding: 16px; border-radius: 8px;">
-            <h4 style="color: #92400e; margin: 0 0 8px; font-size: 13px;">⚠️ Prioridade Média (Moderado)</h4>
+            <h4 style="color: #92400e; margin: 0 0 12px; font-size: 13px;">⚠️ Prioridade Média</h4>
             <ul style="margin:0; padding-left: 20px; font-size: 12px; color: #92400e; line-height: 1.6;">
                ${axeViolations.filter(v => v.impact === 'moderate').map(v => `<li>${v.description}</li>`).join('') || '<li>Nenhuma ocorrência.</li>'}
             </ul>
           </div>
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 8px;">
-            <h4 style="color: #166534; margin: 0 0 8px; font-size: 13px;">ℹ️ Prioridade Baixa (Baixo)</h4>
+            <h4 style="color: #166534; margin: 0 0 12px; font-size: 13px;">ℹ️ Prioridade Baixa</h4>
             <ul style="margin:0; padding-left: 20px; font-size: 12px; color: #14532d; line-height: 1.6;">
                ${axeViolations.filter(v => v.impact === 'minor').map(v => `<li>${v.description}</li>`).join('') || '<li>Nenhuma ocorrência.</li>'}
             </ul>
@@ -535,7 +527,7 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
   </div>
 
   <!-- ACESSIBILIDADE -->
-  <h2 class="section-title">Análise de Acessibilidade (eMAG / WCAG)</h2>
+  <h2 class="section-title">Análise de Acessibilidade (WCAG 2.1)</h2>
   ${axeHtml}
 
   <!-- CASO DE TESTE -->
@@ -546,13 +538,14 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
   <h2 class="section-title">Execução e Evidências Funcionais</h2>
   ${passosHtml}
 
-  <div class="footer">Gerado automaticamente pelo Sistema de QA Automatizado &copy; ${new Date().getFullYear()}</div>
+  <div class="footer">
+    <p style="margin:0">Gerado automaticamente pelo <strong>Sistema Planner</strong> &copy; ${new Date().getFullYear()}</p>
+  </div>
 </div>
 
 <script>
   let myChart = null;
 
-  // Variáveis injetadas pelo backend para o gráfico
   const dataPassos = [${aprovados}, ${falhas}, ${total - aprovados - falhas}];
   const dataAxe = [
     ${axeViolations.filter(v => v.impact === 'minor').reduce((a,b)=>a+b.nodes.length,0)},
@@ -572,15 +565,16 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
         datasets: [{
           data: dataPassos,
           backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
-          borderWidth: 2,
-          borderColor: '#ffffff'
+          borderWidth: 0,
+          hoverOffset: 4
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        plugins: { legend: { position: 'bottom' } }
+        cutout: '70%',
+        plugins: { legend: { position: 'bottom', labels: { font: { family: 'Inter', size: 12 } } } }
       }
     });
 
@@ -591,8 +585,8 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
         datasets: [{
           label: 'Elementos Afetados',
           data: dataAxe,
-          backgroundColor: ['#166534', '#92400e', '#991b1b', '#7f1d1d'],
-          borderRadius: 6
+          backgroundColor: ['#22c55e', '#f59e0b', '#ef4444', '#b91c1c'],
+          borderRadius: 4
         }]
       },
       options: {
@@ -600,7 +594,10 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
         maintainAspectRatio: false,
         animation: false,
         plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+        scales: { 
+          y: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } } },
+          x: { ticks: { font: { family: 'Inter' } } }
+        }
       }
     });
   }
@@ -613,16 +610,13 @@ code{font-family:'Courier New',monospace;font-size:12px;background:#f1f5f9;paddi
       page.contentEditable = 'false';
       document.body.classList.remove('editing');
       btn.innerHTML = '✏️ Habilitar Edição';
-      btn.style.background = '#3b82f6';
     } else {
       page.contentEditable = 'true';
       document.body.classList.add('editing');
-      btn.innerHTML = '💾 Desativar Edição';
-      btn.style.background = '#f59e0b';
+      btn.innerHTML = '💾 Salvar Edição';
     }
   }
 
-  // Inicializar gráficos
   window.onload = () => {
     initCharts();
   };
