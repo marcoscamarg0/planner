@@ -52,7 +52,7 @@ async function callSingleModel(messages: any[], model: string, apiKey: string, t
   return data.choices[0]?.message?.content || "";
 }
 
-async function callOpenRouter(messages: any[], modelKey: string, apiKey: string): Promise<string> {
+async function callOpenRouter(messages: any[], modelKey: string, apiKey: string, logToStream?: (m: string) => Promise<void>): Promise<string> {
   const requestedModel = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS["auto-free"];
 
   // Build fallback chain: requested model first, then all others
@@ -62,9 +62,11 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
   for (const model of chain) {
     try {
       console.log(`[QA API] Trying model: ${model}`);
+      if (logToStream) await logToStream(`[LOG] Tentando modelo: ${model}`);
       const result = await callSingleModel(messages, model, apiKey);
       if (model !== requestedModel) {
         console.log(`[QA API] Fallback succeeded with: ${model}`);
+        if (logToStream) await logToStream(`[LOG] Sucesso com o modelo: ${model}`);
       }
       return result;
     } catch (err: any) {
@@ -72,6 +74,7 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
       const isRetryable = err.status === 404 || err.status === 429 || err.status === 408 || err.status >= 500 || (err.message && (err.message.includes("404") || err.message.includes("429") || err.message.includes("502") || err.message.includes("503")));
       const isAbort = err.name === "AbortError";
       if (isRetryable || isAbort) {
+        if (logToStream) await logToStream(`[LOG] Falha no modelo ${model} (${isAbort ? "timeout" : "erro " + err.status}), tentando próximo...`);
         console.warn(`[QA API] Model ${model} failed (${isAbort ? "timeout" : "provider error " + err.status}), trying next fallback...`);
         continue; // try next model
       }
@@ -84,6 +87,7 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
   const groqKey = process.env.GROQ_API_KEY;
   if (groqKey) {
     try {
+      if (logToStream) await logToStream("[LOG] OpenRouter falhou completamente. Tentando Groq fallback (llama-3.3-70b-versatile)...");
       console.log("[QA API] OpenRouter falhou completamente. Tentando Groq fallback (llama-3.3-70b-versatile)...");
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 40000);
@@ -104,6 +108,7 @@ async function callOpenRouter(messages: any[], modelKey: string, apiKey: string)
       const data = await response.json();
       return data.choices[0]?.message?.content || "";
     } catch (groqErr: any) {
+      if (logToStream) await logToStream("[LOG] Erro fatal também no Groq: " + groqErr.message);
       console.error("[QA API] Groq Fallback Error:", groqErr.message);
       lastError = groqErr;
     }
@@ -300,15 +305,16 @@ export async function POST(req: Request) {
       }
       // -----------------------------------------------------------
 
-      const sys = "Você é um engenheiro de QA sênior. Para CADA cenário listado abaixo, gere exatamente 1 caso de teste. "
-        + "NÃO agrupe cenários diferentes. NÃO omita nenhum cenário. "
-        + "Crie um 'title' completo e descritivo (NUNCA use reticências '...'). "
-        + "Retorne APENAS JSON válido no formato: "
-        + '{"test_cases": [{"id": "TC001", "title": "título descritivo completo do teste sem abreviações", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
+      const sys = "Você é um Engenheiro de QA Sênior especialista em testes end-to-end.\n"
+        + "Sua tarefa é analisar os cenários gravados e gerar uma suíte de casos de teste REAIS E PROFISSIONAIS em formato JSON.\n"
+        + "REGRA CRÍTICA: FILTRE e IGNORE cenários inúteis, repetitivos ou sem sentido, como 'clicar num link e permanecer na mesma página' ou 'fechar aba sem contexto'. Crie casos de teste APENAS para fluxos funcionais reais, lógicos e que tenham valor de negócio.\n"
+        + "Os títulos devem ser profissionais, diretos e focados na ação (ex: 'Validar redirecionamento para X', 'Testar preenchimento de Y'). NUNCA use reticências '...'\n"
+        + "Retorne APENAS JSON válido no formato:\n"
+        + '{"test_cases": [{"id": "TC001", "title": "título descritivo completo do teste", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
 
-      const usr = `Crie 1 caso de teste para CADA um dos ${processedInput.match(/Cenário \d+:/g)?.length || 1} cenários abaixo. NÃO pule nenhum.\n\n`
+      const usr = `Analise os cenários abaixo e crie casos de teste APENAS para os fluxos que fazem sentido e têm relevância (filtre o lixo).\n\n`
         + processedInput + htmlContext
-        + "\n\nRetorne apenas o JSON com TODOS os casos de teste, um por cenário, com títulos completos sem reticências.";
+        + "\n\nRetorne apenas o JSON com os casos de teste selecionados.";
 
       result = await callOpenRouter(
         [{ role: "system", content: sys }, { role: "user", content: usr }],

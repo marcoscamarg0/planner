@@ -87,7 +87,7 @@ export function BatchRunnerTab() {
   return (
     <div className="space-y-6">
       {/* Formulário de Adição */}
-      <div className="glass rounded-2xl border border-border p-6 shadow-sm">
+      <div className="bg-surface/50 rounded-2xl border border-border/50 p-6 shadow-sm">
         <h2 className="text-lg font-bold text-foreground mb-4">Adicionar à Fila de Testes</h2>
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -135,7 +135,7 @@ export function BatchRunnerTab() {
       </div>
 
       {/* Lista da Fila */}
-      <div className="glass rounded-2xl border border-border p-6 shadow-sm">
+      <div className="bg-surface/50 rounded-2xl border border-border/50 p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
             Fila de Execução 

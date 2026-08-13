@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2, Play } from "lucide-react";
+import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2, Play, Code2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn, getPriorityColor, getPriorityLabel, getStatusLabel, formatDate } from "@/lib/utils";
@@ -625,6 +625,15 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                       >
                         {task.title}
                       </p>
+                      {task.metadata?.automationCode && (
+                        <span
+                          className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 w-fit"
+                          title="Passos de automação já gerados"
+                        >
+                          <Code2 className="w-2.5 h-2.5" />
+                          Passos gerados
+                        </span>
+                      )}
 
                       <div className="flex items-center gap-3 mt-2 flex-wrap">
                         <select
@@ -742,6 +751,15 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                               )}>
                                 {subtask.title}
                               </p>
+                              {subtask.metadata?.automationCode && (
+                                <span
+                                  className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 w-fit"
+                                  title="Passos de automação já gerados"
+                                >
+                                  <Code2 className="w-2.5 h-2.5" />
+                                  Passos gerados
+                                </span>
+                              )}
                               <div className="flex items-center gap-3 mt-1 flex-wrap">
                                 <select
                                   value={subtask.priority}

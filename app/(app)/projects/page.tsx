@@ -1,11 +1,10 @@
-import { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 import { ProjectsClient } from "./ProjectsClient";
 
-export const metadata: Metadata = {
-  title: "Projetos",
-  description: "Todos os seus projetos de planejamento",
+export const metadata = {
+  title: "Projetos | Planner",
+  description: "Gerencie seus projetos",
 };
 
 export default async function ProjectsPage() {
@@ -29,15 +28,20 @@ export default async function ProjectsPage() {
     { data: insights }
   ] = projectIds.length > 0
     ? await Promise.all([
-        supabase.from("tasks").select("id, project_id, status").in("project_id", projectIds),
+        supabase.from("tasks").select("*").in("project_id", projectIds),
         supabase.from("pages").select("id, project_id").in("project_id", projectIds),
         supabase.from("ai_insights").select("*").in("project_id", projectIds).order("created_at", { ascending: false }).limit(30)
       ])
     : [{ data: [] }, { data: [] }, { data: [] }];
 
   const projectsWithStats = (projects ?? []).map((project) => {
-    const projectTasks = (tasks ?? []).filter((t) => t.project_id === project.id);
-    const projectPages = (pages ?? []).filter((p) => p.project_id === project.id);
+    const subprojectIds = (projects ?? []).filter((p) => p.parent_id === project.id).map((p) => p.id);
+    const allIds = [project.id, ...subprojectIds];
+
+    const projectTasks = (tasks ?? []).filter(
+      (t) => allIds.includes(t.project_id) && t.status !== "cancelled" && t.title?.trim() !== "" && !t.title?.startsWith("[QA]") && !t.parent_task_id
+    );
+    const projectPages = (pages ?? []).filter((p) => allIds.includes(p.project_id));
     const lastInsight = (insights ?? []).find((i) => i.project_id === project.id);
 
     return {

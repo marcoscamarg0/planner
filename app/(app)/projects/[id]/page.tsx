@@ -53,10 +53,37 @@ export default async function ProjectPage({ params }: Props) {
 
   // If this is a root project (no parent_id), render the parent container view
   if (!project.parent_id) {
+    // Enrich each subproject with task stats
+    const subIds = (subProjects ?? []).map((s) => s.id);
+    let subProjectsWithStats = (subProjects ?? []).map((s) => ({
+      ...s,
+      total_tasks: 0,
+      completed_tasks: 0,
+      pages_count: 0,
+    }));
+
+    if (subIds.length > 0) {
+      const { data: subTasks } = await supabase
+        .from("tasks")
+        .select("id, project_id, status")
+        .in("project_id", subIds);
+
+      if (subTasks && subTasks.length > 0) {
+        subProjectsWithStats = subProjectsWithStats.map((s) => {
+          const projectTasks = subTasks.filter((t) => t.project_id === s.id && t.status !== "cancelled");
+          return {
+            ...s,
+            total_tasks: projectTasks.length,
+            completed_tasks: projectTasks.filter((t) => t.status === "done").length,
+          };
+        });
+      }
+    }
+
     return (
-      <ParentProjectClient 
+      <ParentProjectClient
         project={project}
-        subProjects={subProjects ?? []}
+        subProjects={subProjectsWithStats}
         currentUserId={user.id}
       />
     );

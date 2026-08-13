@@ -1026,7 +1026,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="glass rounded-2xl border border-amber-500/30 p-5 space-y-4 bg-amber-500/5">
+                  <div className="bg-amber-500/5 rounded-2xl border border-amber-500/30 p-5 space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Edit3 className="w-4 h-4 text-amber-400" />
@@ -1114,7 +1114,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
 
             {/* Screenshot final */}
             {result.finalScreenshot && (
-              <div className="glass rounded-2xl border border-border overflow-hidden">
+              <div className="bg-surface/50 rounded-2xl border border-border/50 overflow-hidden shadow-sm">
                 <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" />
                   <p className="text-sm font-medium text-foreground">Estado Final da Página</p>
@@ -1130,7 +1130,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
 
             {/* Passos gerados pela IA */}
             {result.generatedStepsCode && result.generatedStepsCode.length > 0 && (
-              <div className="glass rounded-2xl border border-border overflow-hidden">
+              <div className="bg-surface/50 rounded-2xl border border-border/50 overflow-hidden shadow-sm">
                 <button
                   onClick={() => setShowGenerated(!showGenerated)}
                   className="w-full flex items-center justify-between px-5 py-4 hover:bg-accent/30 transition-colors"
@@ -1166,7 +1166,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
             )}
 
             {/* Detalhes dos passos executados */}
-            <div className="glass rounded-2xl border border-border overflow-hidden">
+            <div className="bg-surface/50 rounded-2xl border border-border/50 overflow-hidden shadow-sm">
               <button
                 onClick={() => setShowSteps(!showSteps)}
                 className="w-full flex items-center justify-between px-5 py-4 hover:bg-accent/30 transition-colors"
@@ -1236,7 +1236,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
       </AnimatePresence>
 
       {/* ── Histórico de Execuções ──────────────────────────── */}
-      <div className="glass rounded-2xl border border-border overflow-hidden">
+      <div className="bg-surface/50 rounded-2xl border border-border/50 overflow-hidden shadow-sm">
         <button
           onClick={() => { setShowHistory(h => !h); if (!showHistory && history.length === 0) loadHistory(); }}
           className="w-full flex items-center justify-between px-5 py-4 hover:bg-accent/30 transition-colors"

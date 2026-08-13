@@ -74,14 +74,16 @@ export default async function DashboardPage() {
   const [
     { data: tasks },
     { data: pages },
-    { data: insights }
+    { data: insights },
+    { count: qaPending }
   ] = projectIds.length > 0
     ? await Promise.all([
-        supabase.from("tasks").select("id, project_id, status").in("project_id", projectIds),
+        supabase.from("tasks").select("*").in("project_id", projectIds),
         supabase.from("pages").select("id, project_id").in("project_id", projectIds),
-        supabase.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(50)
+        supabase.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(50),
+        supabase.from("qa_reports").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("type", "test_cases")
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }];
+    : [{ data: [] }, { data: [] }, { data: [] }, { count: 0 }];
 
   const projectsWithStats = (projects ?? []).map((project) => {
     const projectTasks = (tasks ?? []).filter(
@@ -103,8 +105,11 @@ export default async function DashboardPage() {
     };
   });
 
-  const totalTasks = (tasks ?? []).length;
-  const completedTasks = (tasks ?? []).filter((t) => t.status === "done").length;
+  const parentTasks = (tasks ?? []).filter(
+    t => !t.parent_task_id && t.status !== "cancelled" && t.title?.trim() !== "" && !t.title?.startsWith("[QA]")
+  );
+  const totalTasks = parentTasks.length;
+  const completedTasks = parentTasks.filter((t) => t.status === "done").length;
 
   const stats = {
     total_projects: (projects ?? []).length,
@@ -113,6 +118,7 @@ export default async function DashboardPage() {
     completed_tasks: completedTasks,
     completion_rate:
       totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+    qa_pending: qaPending ?? 0,
   };
 
   return (

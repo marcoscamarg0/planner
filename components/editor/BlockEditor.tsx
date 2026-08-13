@@ -63,6 +63,7 @@ export function BlockEditor({
     ],
     content: content ?? undefined,
     editable,
+    immediatelyRender: false,
     editorProps: {
       attributes: {
         class: "prose-dark",

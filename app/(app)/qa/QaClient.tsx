@@ -262,6 +262,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
   const [selectedFramework, setSelectedFramework] = useState("playwright");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
   const [result, setResult] = useState<string | null>(null);
   const [testCases, setTestCases] = useState<TestCase[] | null>(null);
   const [selectedTestCaseIds, setSelectedTestCaseIds] = useState<Set<string>>(new Set());
@@ -723,7 +724,17 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
       setBatchProgress({ current, total, currentTitle: tc.title });
       
       try {
-        const flowDesc = tc.steps.join("\n");
+        const flowDesc = [
+          `**Título:** ${tc.title}`,
+          `**Categoria:** ${tc.category}`,
+          `**Prioridade:** ${tc.priority}`,
+          ``,
+          `**Passos:**`,
+          ...tc.steps.map((s, i) => `${i + 1}. ${s}`),
+          ``,
+          `**Resultado Esperado:**`,
+          tc.expected_result,
+        ].join("\n");
         const res = await fetch("/api/automation/smart-run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1086,8 +1097,13 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
     setSaveSuccess(false);
     try {
       const supabase = createClient();
+
+      // Respeita a seleção: se houver casos selecionados, salva apenas eles; caso contrário, salva todos
+      const casesToSave = selectedTestCaseIds.size > 0
+        ? testCases.filter(tc => selectedTestCaseIds.has(tc.id))
+        : testCases;
       
-      const tasksToInsert = testCases.map(tc => {
+      const tasksToInsert = casesToSave.map(tc => {
         let desc = `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n`;
         desc += `**Prioridade:** ${tc.priority.toUpperCase()}\n\n`;
         desc += `**Passos:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
@@ -1095,10 +1111,10 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
         
         return {
           project_id: projectId,
-          title: `[${tc.id}] ${tc.title}`,
+          title: `[QA] ${tc.id} — ${tc.title}`,
           description: desc,
           status: "todo",
-          priority: "medium",
+          priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
           metadata: tc.evidence ? { evidence: tc.evidence } : {}
         };
       });
@@ -1126,8 +1142,8 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
       const supabase = createClient();
       const { error } = await supabase.from("tasks").insert({
         project_id: projectId,
-        title: `[QA] ${tcId} - Passo ${stepIndex + 1}`,
-        description: `Caso de teste: ${tcTitle}\n\n**Passo a ser executado/automatizado**:\n${stepText}\n\n**Resultado Esperado**:\n${expectedResult}`,
+        title: `[QA] ${tcTitle} — Passo ${stepIndex + 1}`,
+        description: `**Caso de teste:** ${tcId} — ${tcTitle}\n\n**Passo ${stepIndex + 1} a ser executado/automatizado:**\n${stepText}\n\n**Resultado Esperado:**\n${expectedResult}`,
         status: "todo",
         priority: "medium",
       });
@@ -1666,7 +1682,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                     "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all",
                     activeTab === t.key
                       ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25"
-                      : "glass text-muted-foreground hover:text-foreground border border-border"
+                      : "text-muted-foreground hover:text-foreground border border-border"
                   )}
                 >
                   <Icon className="w-4 h-4" />
@@ -1776,7 +1792,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                 exit={{ opacity: 0, height: 0 }}
                 className="overflow-hidden"
               >
-                <div className="glass rounded-2xl border border-border overflow-hidden">
+                <div className="bg-surface/50 rounded-2xl border border-border/50 overflow-hidden shadow-sm">
                   <div className="px-5 py-4 border-b border-border flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <History className="w-4 h-4 text-primary" />
@@ -2263,7 +2279,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                 </div>
 
                 {/* Input Area for selected report type */}
-                <div className="glass rounded-2xl border border-border p-5 space-y-4">
+                <div className="bg-surface/50 rounded-2xl border border-border/50 p-5 space-y-4 shadow-sm">
                   <p className="text-xs text-muted-foreground">
                     {REPORT_TYPES.find(r => r.key === selectedReportType)?.desc}
                   </p>
@@ -2279,23 +2295,67 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                       onClick={async () => {
                         if (!input.trim()) return;
                         setLoading(true);
+                        setLogs([]);
                         setResult(null);
                         setError(null);
                         try {
-                          const res = await fetch("/api/ai/qa", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              tool_type: selectedReportType,
-                              input: input.trim(),
-                              model: selectedModel,
-                            }),
-                          });
-                          const data = await res.json();
-                          if (!res.ok) throw new Error(data.error || "Falha na geração");
-                          if (data.report) setSelectedReport(data.report);
-                          setResult(data.result);
-                          loadReports();
+                          if (selectedReportType === "test_cases") {
+                            const res = await fetch("/api/ai/qa/stream", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                tool_type: selectedReportType,
+                                input: input.trim(),
+                                model: selectedModel,
+                                project_id: projectId,
+                              }),
+                            });
+                            
+                            if (!res.body) throw new Error("Sem corpo na resposta");
+                            const reader = res.body.getReader();
+                            const decoder = new TextDecoder();
+                            let buffer = "";
+
+                            while (true) {
+                              const { value, done } = await reader.read();
+                              if (done) break;
+                              buffer += decoder.decode(value, { stream: true });
+                              const lines = buffer.split("\\n");
+                              buffer = lines.pop() || "";
+                              
+                              for (const line of lines) {
+                                if (!line.trim()) continue;
+                                try {
+                                  const parsed = JSON.parse(line);
+                                  if (parsed.type === "log") {
+                                    setLogs(prev => [...prev, parsed.message]);
+                                  } else if (parsed.type === "result") {
+                                    if (parsed.report) setSelectedReport(parsed.report);
+                                    setResult(parsed.result);
+                                    loadReports();
+                                  } else if (parsed.error) {
+                                    throw new Error(parsed.error);
+                                  }
+                                } catch(e) {}
+                              }
+                            }
+                          } else {
+                            const res = await fetch("/api/ai/qa", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                tool_type: selectedReportType,
+                                input: input.trim(),
+                                model: selectedModel,
+                                project_id: projectId,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.error || "Falha na geração");
+                            if (data.report) setSelectedReport(data.report);
+                            setResult(data.result);
+                            loadReports();
+                          }
                         } catch (e: any) {
                           setError(e.message || "Ocorreu um erro inesperado.");
                         } finally {
@@ -2310,6 +2370,25 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                     </button>
                   </div>
                 </div>
+
+                {/* Logs Terminal UI */}
+                {loading && selectedReportType === "test_cases" && (
+                  <div className="bg-black/90 border border-primary/20 rounded-xl p-4 font-mono text-xs text-primary/80 h-48 overflow-y-auto shadow-inner">
+                    <div className="flex items-center gap-2 mb-3 sticky top-0 bg-black/90 pb-2 border-b border-primary/20">
+                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                      <span className="font-semibold tracking-wider uppercase text-[10px]">Console de Geração</span>
+                    </div>
+                    <div className="space-y-1.5 opacity-90 flex flex-col justify-end min-h-[100px]">
+                      {logs.map((log, i) => (
+                        <div key={i} className="flex gap-2">
+                          <span className="text-primary/40 shrink-0">[{new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}]</span>
+                          <span className="text-primary break-words whitespace-pre-wrap">{log}</span>
+                        </div>
+                      ))}
+                      {logs.length === 0 && <div className="text-primary/50 italic">Iniciando a conexão segura...</div>}
+                    </div>
+                  </div>
+                )}
 
                 {/* Error */}
                 {error && (
@@ -2359,7 +2438,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
           <div className="max-w-5xl mx-auto px-6 pb-6 space-y-6">
 
           {/* Input Area */}
-          <div className="glass rounded-2xl border border-border p-5 space-y-4">
+          <div className="bg-surface/50 rounded-2xl border border-border/50 p-5 space-y-4 shadow-sm">
             <div>
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <p className="text-xs text-muted-foreground">
@@ -2421,7 +2500,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
 
           {/* Error */}
           {error && (
-            <div className="glass rounded-xl border border-rose-500/30 p-4 flex items-start gap-3">
+            <div className="bg-rose-500/5 rounded-xl border border-rose-500/30 p-4 flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
               <p className="text-sm text-rose-400">{error}</p>
             </div>
@@ -2443,7 +2522,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                   const pct = total ? Math.round((passed / total) * 100) : 0;
                   if (executed === 0) return null;
                   return (
-                    <div className="glass rounded-xl border border-border p-4 space-y-3">
+                    <div className="bg-surface/50 rounded-xl border border-border/50 p-4 space-y-3 shadow-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-foreground">Resumo de Execução</span>
                         <span className="text-xs text-muted-foreground">{executed}/{total} executados</span>
@@ -2463,7 +2542,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
 
                 {/* ── Batch Progress Indicator ── */}
                 {isBatchRunning && (
-                  <div className="glass rounded-xl border border-primary/30 p-4 space-y-3 bg-primary/5">
+                  <div className="bg-primary/5 rounded-xl border border-primary/30 p-4 space-y-3 shadow-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-primary flex items-center gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -2607,7 +2686,12 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                           </div>
                           <div>
                             <h3 className="font-semibold text-foreground">Salvar no Projeto</h3>
-                            <p className="text-xs text-muted-foreground">{testCases?.length} casos de teste serão vinculados</p>
+                            <p className="text-xs text-muted-foreground">
+                              {selectedTestCaseIds.size > 0
+                                ? `${selectedTestCaseIds.size} casos selecionados serão salvos`
+                                : `Todos os ${testCases?.length} casos de teste serão salvos`
+                              }
+                            </p>
                           </div>
                           <button onClick={() => setShowSaveModal(false)} className="ml-auto p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                         </div>
@@ -2761,7 +2845,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                     const cardBorder = status === "pass" ? "border-emerald-500/60 bg-emerald-500/5" : status === "fail" ? "border-rose-500/60 bg-rose-500/5" : status === "blocked" ? "border-amber-500/60 bg-amber-500/5" : "border-border";
                     return (
                       <motion.div key={tc.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                        className={`glass rounded-xl border p-4 space-y-3 transition-colors ${cardBorder}`}
+                        className={`rounded-xl border p-4 space-y-3 transition-colors ${cardBorder}`}
                       >
                         <div className="flex items-start justify-between gap-3 flex-wrap">
                           <div className="flex items-center gap-2">
@@ -2904,7 +2988,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                     </button>
                   </div>
                 </div>
-                <div className="glass rounded-xl border border-border overflow-hidden p-5">
+                <div className="bg-surface/50 rounded-xl border border-border/50 overflow-hidden p-5 shadow-sm">
                   <pre className="text-xs leading-relaxed text-foreground overflow-x-auto whitespace-pre-wrap font-mono">
                     {result}
                   </pre>

@@ -243,12 +243,48 @@ export function buildReportHtml(opts: ReportOptions): string {
     const resultadoEsperado = buildResultadoEsperado(r);
     const evidenciaFuncional = buildEvidenciaFuncional(r, r.index);
 
-    const imagemHtml = (r.screenshotBase64 || r.screenshotElementBase64)
-      ? `<div style="position: relative; display: inline-block; width: 100%;">
-          ${r.screenshotBase64 ? `<img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Evidência Passo #${r.index}">` : `<div style="padding: 40px; background: #f8fafc; text-align: center; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 8px; font-size: 13px;">Ação sem mudança de tela inteira capturada.</div>`}
-          ${r.screenshotElementBase64 ? `<img src="data:image/jpeg;base64,${r.screenshotElementBase64}" alt="Elemento Interagido" style="position: absolute; bottom: 16px; right: 16px; max-width: 300px; max-height: 200px; border: 2px solid #ef4444; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); background: white; z-index: 10;">` : ''}
-         </div>`
-      : `<div class="sem-evidencia">⚠ Sem captura de tela disponível para este passo.</div>`;
+    const hasAnyImage = r.screenshotBase64 || r.screenshotBeforeBase64 || r.screenshotElementBase64;
+    let imagemHtml = '';
+    
+    if (!hasAnyImage) {
+      imagemHtml = `<div class="sem-evidencia">⚠ Sem captura de tela disponível para este passo.</div>`;
+    } else {
+      imagemHtml = `<div style="display: flex; flex-direction: column; gap: 20px; width: 100%;">`;
+      
+      // ANTES
+      if (r.screenshotBeforeBase64) {
+        imagemHtml += `
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 13px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">📍 Onde o robô clicou (Antes)</div>
+            <div style="position: relative; width: 100%;">
+              <img src="data:image/jpeg;base64,${r.screenshotBeforeBase64}" class="evidencia-img" alt="Evidência Antes">
+            </div>
+          </div>
+        `;
+      } else if (r.screenshotElementBase64 && !r.screenshotBeforeBase64) {
+        // Fallback backward compatibility for older reports
+        imagemHtml += `
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 13px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">📍 Elemento interagido</div>
+            <img src="data:image/jpeg;base64,${r.screenshotElementBase64}" style="max-width: 300px; max-height: 200px; border: 2px solid #ef4444; border-radius: 6px; background: white;">
+          </div>
+        `;
+      }
+
+      // DEPOIS
+      if (r.screenshotBase64) {
+        imagemHtml += `
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 13px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">🎯 Resultado da Ação</div>
+            <div style="position: relative; width: 100%;">
+              <img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Resultado Passo #${r.index}">
+            </div>
+          </div>
+        `;
+      }
+
+      imagemHtml += `</div>`;
+    }
 
     return `
     <div class="passo-card" id="passo-${numPasso}">

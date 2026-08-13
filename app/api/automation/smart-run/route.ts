@@ -30,7 +30,7 @@ interface SmartStep {
   isPopup?: boolean;
 }
 
-import { tryParseDirectSteps, robustJsonParse } from '@/lib/automation/parser';
+import { tryParseDirectSteps, robustJsonParse, parsePortugueseRoteiro } from '@/lib/automation/parser';
 
 // -------------------------------------------------------
 // System prompt (array to avoid SWC template-literal bug)
@@ -69,6 +69,8 @@ const SMART_RUN_SYSTEM_PROMPT = [
   '',
   '10. IDIOMA OBRIGATÓRIO: Você deve responder EXCLUSIVAMENTE em Português do Brasil (PT-BR), inclusive nos labels.',
   '',
+  '11. COBERTURA TOTAL DO ROTEIRO (CRÍTICO): Se o usuário fornecer passos numerados (ex: "1. Clicar em X", "2. Preencher Y"), você DEVE gerar um step de interação para CADA passo numerado, sem exceção. Gerar apenas goto+wait quando houver passos é PROIBIDO.',
+  '',
   'IMPORTANTE: Responda ESTRITAMENTE com o JSON válido contendo o array "steps". Não inclua blocos de markdown ```json. Feche todos os objetos corretamente.',
 ].join('\n');
 
@@ -82,7 +84,14 @@ async function generateStepsFromDescription(
   contextImages: string[] = []
 ): Promise<SmartStep[]> {
 
-  // --- Atalho: se o input já contém passos JSON, usá-los diretamente ---
+  // --- Prioridade 1: Parser determinístico de roteiro PT-BR (sem IA, sem aleatoriedade) ---
+  const roteiroSteps = parsePortugueseRoteiro(flowDescription, targetUrl);
+  if (roteiroSteps && roteiroSteps.length > 2) {
+    console.log('[SmartRun] Roteiro PT-BR parseado deterministicamente: ' + roteiroSteps.length + ' steps (SEM IA).');
+    return roteiroSteps as unknown as SmartStep[];
+  }
+
+  // --- Prioridade 2: se o input já contém passos JSON/Codegen, usá-los diretamente ---
   const directSteps = tryParseDirectSteps(flowDescription);
   if (directSteps) {
     console.log('[SmartRun] Usando ' + directSteps.length + ' passos do JSON fornecido diretamente (sem IA).');
@@ -107,7 +116,27 @@ async function generateStepsFromDescription(
   };
   const llmModel = modelMap[model] || 'openrouter/auto';
 
-  const userPrompt = 'URL: ' + targetUrl + '\n\nFluxo/Código fornecido:\n' + flowDescription + '\n\nConverter em passos JSON.';
+  // Build a structured, explicit prompt so the AI maps EVERY numbered step in the roteiro
+  const userPrompt = [
+    '== CONTEXTO ==',
+    'Você está automatizando um caso de teste de QA para a URL: ' + targetUrl,
+    '',
+    '== ROTEIRO / SCRIPT FORNECIDO ==',
+    flowDescription,
+    '',
+    '== SUA TAREFA ==',
+    'Leia TODOS os passos numerados acima (ex: "1.", "2.", "3."...) e converta CADA UM em um step JSON do Playwright.',
+    'REGRAS OBRIGATÓRIAS:',
+    '- Não omita nenhum passo numerado. Se houver 4 passos, gere pelo menos 4 steps de interação.',
+    '- Para cada passo "Clicar em X" -> action:"click", selectorType:"text" ou "role", selector/value = texto do elemento X.',
+    '- Para cada passo "Preencher campo X com Y" -> action:"type", selector = campo X, value = Y.',
+    '- Para cada passo "Navegar para X" / "Acessar X" -> action:"goto", value = URL.',
+    '- Se o resultado esperado menciona abertura de nova aba, inclua action:"closePopups" após o clique para voltar à aba principal.',
+    '- Sempre inclua um action:"wait" de 1500ms após cada clique ou navegação.',
+    '- O primeiro step deve ser action:"goto" com a URL: ' + targetUrl,
+    '',
+    'Gere EXATAMENTE o JSON com o array "steps" cobrindo TODOS os passos do roteiro.',
+  ].join('\n');
 
   if (!OPENROUTER_API_KEY) {
     return [
@@ -231,6 +260,7 @@ interface StepResult {
   status: 'aprovado' | 'falha_clique' | 'erro_js' | 'pulado';
   detalhe: string;
   screenshotBase64?: string;
+  screenshotBeforeBase64?: string;
   screenshotElementBase64?: string;
   duration?: number;
 }
@@ -269,6 +299,7 @@ async function autoAcceptCookies(page: any) {
 async function runStep(page: any, step: SmartStep, index: number, baseUrl: string): Promise<StepResult> {
   const start = Date.now();
   let screenshotBase64: string | undefined;
+  let screenshotBeforeBase64: string | undefined;
   let screenshotElementBase64: string | undefined;
   const lower = (step.label || '').toLowerCase();
 
@@ -304,11 +335,11 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       // Traz a aba correta para frente para o screenshot não ficar escondido
       await p.bringToFront().catch(() => {});
 
-      // Força a espera do carregamento e do rendering do JS para sites lentos
+      // Aguarda apenas o DOM estar pronto (sem pausa fixa para evitar screenshots duplicados)
       await p.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
-      await p.waitForTimeout(2000);
+      await p.waitForTimeout(600);
       
-      // Tira o print da aba inteira (fallback)
+      // Tira o print da aba inteira
       const buf = await p.screenshot({ type: 'jpeg', quality: 70, timeout: 15000 });
       return (buf as Buffer).toString('base64');
     } catch { return undefined; }
@@ -349,7 +380,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + dest, screenshotBase64, duration: Date.now() - start };
     }
 
-    if (lower.includes('aguardar') || lower.includes('wait')) {
+    if (step.action === 'wait') {
       const ms = step.milliseconds || 2000;
       await activePage.waitForTimeout(ms);
       screenshotBase64 = await takeScreenshot(activePage);
@@ -357,12 +388,10 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     }
 
     if (step.action === 'scroll') {
-      if (lower.includes('rolar') || lower.includes('scroll')) {
-        await activePage.mouse.wheel(0, 800);
-        await activePage.waitForTimeout(1000);
-        screenshotBase64 = await takeScreenshot(activePage);
-        return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', screenshotBase64, duration: Date.now() - start };
-      }
+      await activePage.mouse.wheel(0, 800);
+      await activePage.waitForTimeout(800);
+      screenshotBase64 = await takeScreenshot(activePage);
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Rolagem executada.', screenshotBase64, duration: Date.now() - start };
     }
 
     if (step.action as any === 'closePopups') {
@@ -475,8 +504,11 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
 
     await activePage.waitForTimeout(400);
 
-    // Evidência pequena do elemento ANTES da ação e após o highlight
+    // Evidência do estado ANTES da ação (página inteira com o highlight aplicado)
     if (step.action !== 'type' && step.action !== 'hover') {
+      screenshotBeforeBase64 = await takeScreenshot(activePage);
+      
+      // Também capturamos o elemento pequeno opcionalmente
       const buf = await locator.screenshot({ type: 'jpeg', quality: 80, timeout: 5000 }).catch(() => null);
       if (buf) screenshotElementBase64 = buf.toString('base64');
     }
@@ -566,7 +598,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       detalhe += ` ➡️ Página atual: ${currentUrl}`;
     }
 
-    return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, screenshotElementBase64, duration: Date.now() - start };
+    return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, screenshotBeforeBase64, screenshotElementBase64, duration: Date.now() - start };
 
   } catch (err: unknown) {
     // Check if the page URL changed — if so, the action actually worked
@@ -586,7 +618,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
         label: step.label,
         status: 'aprovado',
         detalhe: `Clique executado (com aviso de timeout). ➡️ Página atual: ${urlAfterError}`,
-        screenshotBase64, screenshotElementBase64,
+        screenshotBase64, screenshotBeforeBase64, screenshotElementBase64,
         duration: Date.now() - start,
       };
     }
@@ -604,7 +636,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
           label: step.label,
           status: 'aprovado',
           detalhe: `Clique abriu nova aba: ${popupUrl}`,
-          screenshotBase64, screenshotElementBase64,
+          screenshotBase64, screenshotBeforeBase64, screenshotElementBase64,
           duration: Date.now() - start,
         };
       }
@@ -622,8 +654,8 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       }
     } catch { /* ignore */ }
     const msg = err instanceof Error ? err.message.split('\n')[0].substring(0, 200) : String(err);
-    // Forçando aprovação conforme solicitado para evitar qualquer marcação de falha no relatório
-    return { index, label: step.label, status: 'aprovado', detalhe: 'Ação executada (Aviso: ' + msg + ')', screenshotBase64, screenshotElementBase64, duration: Date.now() - start };
+    // Retorna falha real para que o relatório reflita o estado verdadeiro do teste
+    return { index, label: step.label, status: 'falha_clique', detalhe: 'Falha: ' + msg, screenshotBase64, screenshotBeforeBase64, screenshotElementBase64, duration: Date.now() - start };
   }
 }
 
@@ -891,6 +923,7 @@ export async function POST(req: Request) {
         resultJsonDataForDb.steps = resultJsonDataForDb.steps.map(s => {
           const sCopy = { ...s };
           delete sCopy.screenshotBase64;
+          delete sCopy.screenshotBeforeBase64;
           return sCopy;
         });
       }

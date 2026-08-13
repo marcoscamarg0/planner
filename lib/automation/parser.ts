@@ -1,4 +1,4 @@
-import { AutomationStep } from '../queue/types';
+import { AutomationStep, AutomationAction, SelectorType } from '../queue/types';
 
 /** Walk through a string tracking escape sequences so we know if we're inside a JSON string literal */
 export function balancedSlice(src: string, start: number, open: string, close: string): string | null {
@@ -199,4 +199,155 @@ export function tryParseDirectSteps(input: string): AutomationStep[] | null {
     } catch { /* next */ }
   }
   return null;
+}
+
+// -------------------------------------------------------
+// Deterministic parser: converts numbered PT-BR roteiro
+// steps into SmartStep[] without any AI call.
+// -------------------------------------------------------
+export interface ParsedSmartStep {
+  action: AutomationAction;
+  label: string;
+  selectorType?: SelectorType;
+  selector?: string;
+  value?: string | null;
+  milliseconds?: number;
+}
+
+/**
+ * Extracts the quoted text from a step description.
+ * e.g. `Clicar no card "Denúncia"` → `Denúncia`
+ */
+function extractQuoted(text: string): string | null {
+  const m = text.match(/["'\u00ab\u201c\u201d]([^"'\u00bb\u201c\u201d]+)["'\u00bb\u201c\u201d]/);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Tries to extract a URL from the step text.
+ */
+function extractUrl(text: string): string | null {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0].replace(/[.,;:)]$/, '') : null;
+}
+
+/**
+ * Parses a numbered PT-BR QA roteiro into SmartStep[].
+ * Returns null if the input is not a human-readable roteiro
+ * (e.g. it's raw JSON or Playwright codegen — handled elsewhere).
+ */
+export function parsePortugueseRoteiro(
+  input: string,
+  targetUrl: string
+): ParsedSmartStep[] | null {
+  const trimmed = input.trim();
+
+  // If it starts with JSON characters, skip this parser
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return null;
+  // If it contains no numbered steps at all, skip
+  if (!/^\s*\d+\./m.test(trimmed)) return null;
+
+  // Extract all numbered steps (lines starting with "1.", "2.", etc.)
+  const stepLines: string[] = [];
+  const lines = trimmed.split('\n');
+  for (const line of lines) {
+    const m = line.match(/^\s*\d+\.\s+(.+)/);
+    if (m) stepLines.push(m[1].trim());
+  }
+
+  if (stepLines.length === 0) return null;
+
+  const steps: ParsedSmartStep[] = [];
+
+  // Always start with goto + wait
+  steps.push({ action: 'goto', label: 'Acessar ' + targetUrl, value: targetUrl });
+
+  for (const raw of stepLines) {
+    const lower = raw.toLowerCase();
+
+    // NAVIGATE / GOTO
+    if (
+      lower.startsWith('navegar') || lower.startsWith('acessar') ||
+      lower.startsWith('ir para') || lower.startsWith('abrir') ||
+      lower.startsWith('entrar em') || lower.startsWith('visitar')
+    ) {
+      const url = extractUrl(raw) || targetUrl;
+      steps.push({ action: 'goto', label: raw, value: url });
+      continue;
+    }
+
+    // SCROLL
+    if (lower.includes('rolar') || lower.includes('scroll')) {
+      steps.push({ action: 'scroll', label: raw });
+      continue;
+    }
+
+    // WAIT
+    if (lower.startsWith('aguardar') || lower.startsWith('esperar') || lower.startsWith('wait')) {
+      const msMatch = raw.match(/(\d+)\s*(ms|milissegundo|segundo)/i);
+      const ms = msMatch
+        ? parseInt(msMatch[1]) * (msMatch[2].toLowerCase().startsWith('s') ? 1000 : 1)
+        : 2000;
+      steps.push({ action: 'wait', label: raw, milliseconds: ms });
+      continue;
+    }
+
+    // HOVER
+    if (lower.startsWith('passar o mouse') || lower.startsWith('hover')) {
+      const quoted = extractQuoted(raw);
+      if (quoted) {
+        steps.push({ action: 'hover', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+      }
+      continue;
+    }
+
+    // TYPE / FILL
+    if (
+      lower.startsWith('preencher') || lower.startsWith('digitar') ||
+      lower.startsWith('inserir') || lower.startsWith('escrever') ||
+      lower.startsWith('fill') || lower.startsWith('type')
+    ) {
+      const fieldMatch = raw.match(/["'\u201c\u201d]([^"'\u201c\u201d]+)["'\u201c\u201d]\s+com\s+["'\u201c\u201d]([^"'\u201c\u201d]+)["'\u201c\u201d]/i);
+      if (fieldMatch) {
+        steps.push({ action: 'type', label: raw, selectorType: 'text', selector: fieldMatch[1], value: fieldMatch[2] });
+      } else {
+        const quoted = extractQuoted(raw);
+        if (quoted) steps.push({ action: 'type', label: raw, selectorType: 'text', selector: quoted, value: '' });
+      }
+      continue;
+    }
+
+    // CHECK / MARCAR
+    if (lower.startsWith('marcar') || lower.startsWith('desmarcar') || lower.startsWith('check')) {
+      const quoted = extractQuoted(raw);
+      if (quoted) steps.push({ action: 'check', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+      continue;
+    }
+
+    // SELECT / SELECIONAR
+    if (lower.startsWith('selecionar') || lower.startsWith('escolher')) {
+      const quoted = extractQuoted(raw);
+      if (quoted) steps.push({ action: 'select', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+      continue;
+    }
+
+    // CLICK (default for everything else)
+    const quoted = extractQuoted(raw);
+    if (quoted) {
+      steps.push({ action: 'click', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+    } else {
+      // Strip verb prefix and use the rest as selector hint
+      const selectorHint = raw
+        .replace(/^Clicar\s+(no|na|nos|nas|em|no\s+bot[a\u00e3]o|no\s+link|no\s+card|no\s+menu|no\s+item)\s+/i, '')
+        .replace(/^Clicar\s+/i, '')
+        .trim();
+      steps.push({ action: 'click', label: raw, selectorType: 'text', selector: selectorHint, value: selectorHint });
+    }
+  }
+
+  console.log(
+    '[AutomationParser] parsePortugueseRoteiro: ' + stepLines.length + ' passos do roteiro \u2192 ' +
+    steps.length + ' steps Playwright gerados deterministicamente.'
+  );
+  return steps;
 }

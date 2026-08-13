@@ -11,7 +11,8 @@ export type AutomationAction =
   | 'check'
   | 'screenshot'
   | 'scroll'
-  | 'hover';
+  | 'hover'
+  | 'closePopups';
 
 export type SelectorType = 'role' | 'text' | 'css' | 'testid' | 'id' | 'xpath';
 

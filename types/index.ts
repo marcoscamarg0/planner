@@ -111,4 +111,5 @@ export interface DashboardStats {
   completed_tasks: number;
   total_tasks: number;
   completion_rate: number;
+  qa_pending: number;
 }
