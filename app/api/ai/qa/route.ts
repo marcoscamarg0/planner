@@ -385,13 +385,16 @@ export async function POST(req: Request) {
 
       const sys = "Você é um engenheiro de automação de testes sênior especializado em " + lang + ". "
         + "Gere scripts de teste automatizado profissionais, bem comentados e prontos para execução imediata." + htmlInstruction
-        + " Retorne APENAS o código, sem explicações extras fora do código. "
-        + "IDIOMA OBRIGATÓRIO: Responda e documente o código EXCLUSIVAMENTE em Português do Brasil (PT-BR).";
+        + "\nREGRAS ESTRITAS:"
+        + "\n1. Mapeie EXATAMENTE cada passo fornecido no plano para uma ação de teste correspondente (passo 1, passo 2, etc), sem inventar passos extras nem omitir passos."
+        + "\n2. Use os dados e credenciais EXATOS informados no plano (e-mail, senhas, URLs, textos de botões)."
+        + "\n3. Use seletores resilientes e robustos com fallback separados por vírgula (ex: `page.locator('input[type=\"email\"], input[name*=\"email\" i], input:not([type=\"password\"])')`, `page.locator('input[type=\"password\"], input[name*=\"senha\" i]')`, `page.locator('button:has-text(\"Entrar\"), button[type=\"submit\"]')`)."
+        + "\n4. Retorne APENAS o código executável puro, sem explicações fora dos comentários do código."
+        + "\n5. IDIOMA OBRIGATÓRIO: Documente o código EXCLUSIVAMENTE em Português do Brasil (PT-BR).";
 
-      const usr = "Crie um script de automação de testes completo usando " + lang + " para:\n\n"
+      const usr = "Crie um script de automação de testes completo usando " + lang + " seguindo fielmente este caso de teste:\n\n"
         + input + htmlContext
-        + "\n\nInclua: imports, configuração, describe/it (ou equivalente), seletores reais dos elementos, "
-        + "asserções claras, tratamento de erros e comentários explicativos em português.";
+        + "\n\nO script deve ter 1 bloco ou test.step para cada passo listado no plano acima, com seletores robustos e asserções claras.";
 
       result = await callOpenRouter(
         [{ role: "system", content: sys }, { role: "user", content: usr }],

@@ -105,9 +105,9 @@ function buildEvidenciaFuncional(step: StepResult, index: number): string {
   // --- FALHA ---
   if (status !== 'aprovado') {
     const errMsg = detalhe.replace(/^Falha:\s*/i, '').substring(0, 200);
-    return (hasScreenshot ? 'Screenshot capturado mostrando ' : 'Estado do sistema indicando ') +
-      'falha na execução do passo #' + index + '. Erro registrado: "' + errMsg + '". ' +
-      'O elemento pode estar oculto, com seletor inválido ou bloqueado por overlay.';
+    return (hasScreenshot ? 'Screenshot da tela inteira capturada no momento da falha. ' : 'Estado do sistema indicando falha. ') +
+      'O passo #' + index + ' não pôde ser executado porque ocorreu um erro: "' + errMsg + '". ' +
+      'Como o elemento não foi encontrado (ou estava invisível/bloqueado), o robô não realizou o clique e a navegação não ocorreu.';
   }
 
   // --- GOTO / NAVEGAÇÃO ---
@@ -247,7 +247,10 @@ export function buildReportHtml(opts: ReportOptions): string {
     let imagemHtml = '';
     
     if (!hasAnyImage) {
-      imagemHtml = `<div class="sem-evidencia">⚠ Sem captura de tela disponível para este passo.</div>`;
+      imagemHtml = `<div class="sem-evidencia" style="color: #64748b; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" y1="5" x2="22" y2="5"/><line x1="19" y1="2" x2="19" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+        ↳ Tela inalterada (sem mudanças visuais nesta ação)
+      </div>`;
     } else {
       imagemHtml = `<div style="display: flex; flex-direction: column; gap: 20px; width: 100%;">`;
       

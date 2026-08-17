@@ -94,14 +94,34 @@ export function robustJsonParse(raw: string): any {
 }
 
 // -------------------------------------------------------
-// Detect if input is already a JSON steps array/object
+// Detect if input is already a JSON steps array/object or Playwright code
 // Returns parsed steps or null if not detectable
 // -------------------------------------------------------
-export function tryParseDirectSteps(input: string): AutomationStep[] | null {
+export function tryParseDirectSteps(input: string, targetUrl?: string): AutomationStep[] | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  // --- NATIVE PARSING: Playwright Codegen JSONL ---
+  // --- 1. JSON Array / Steps Object Detection ---
+  if (trimmed.startsWith('[') || (trimmed.startsWith('{') && (trimmed.includes('"action"') || trimmed.includes('"steps"')))) {
+    const candidates = [trimmed];
+    if (trimmed.startsWith('[')) {
+      candidates.push('{"steps":' + trimmed + '}');
+    }
+    for (const candidate of candidates) {
+      try {
+        const parsed = robustJsonParse(candidate);
+        if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+          const valid = parsed.steps.filter((s: any) => typeof s.action === 'string');
+          if (valid.length > 0) {
+            console.log('[AutomationParser] Passos JSON detectados diretamente no input: ' + valid.length);
+            return valid as AutomationStep[];
+          }
+        }
+      } catch { /* next */ }
+    }
+  }
+
+  // --- 2. NATIVE PARSING: Playwright Codegen JSONL ---
   if (trimmed.includes('"name":"') && (trimmed.includes('"openPage"') || trimmed.includes('"navigate"') || trimmed.includes('"click"'))) {
     const lines = trimmed.split('\n').map(l => l.trim()).filter(l => l.startsWith('{') && l.endsWith('}'));
     if (lines.length > 0) {
@@ -135,11 +155,10 @@ export function tryParseDirectSteps(input: string): AutomationStep[] | null {
 
             if (isRole) {
               type = 'role';
-              // example: internal:role=link[name="Iniciar"i]
               const match = sel.match(/internal:role=([^\[]+)\[name=\"?([^\"]+?)\"?i?\]/);
               if (match) {
-                val = match[2]; // name
-                type = match[1]; // role (e.g., 'link', 'button')
+                val = match[2];
+                type = match[1];
                 label = `Clicar em ${type} ${val}`;
               }
             } else if (isText) {
@@ -164,46 +183,211 @@ export function tryParseDirectSteps(input: string): AutomationStep[] | null {
       }
       
       if (pwSteps.length > 0) {
-        console.log('[AutomationParser] Parse nativo de Playwright Codegen: ' + pwSteps.length + ' passos gerados (limpos).');
+        console.log('[AutomationParser] Parse nativo de Playwright Codegen: ' + pwSteps.length + ' passos gerados.');
         return pwSteps;
       }
     }
   }
 
-  // --- FALLBACK: Tentar extrair do formato JSON gerado pela IA ---
-  const candidates = [trimmed];
+  // --- 3. NATIVE PARSING: Playwright TypeScript / JavaScript Code ---
+  // Detection must be strict — Portuguese text like "a página de consulta" contains "página" and could be false-positive.
+  // Require actual code patterns: await keyword, function calls with (), or explicit Playwright imports.
+  const isPlaywrightCode = 
+    trimmed.includes('@playwright/test') ||
+    trimmed.includes('getByPlaceholder(') ||
+    trimmed.includes('getByRole(') ||
+    trimmed.includes('getByText(') ||
+    trimmed.includes('getByLabel(') ||
+    trimmed.includes('getByTestId(') ||
+    trimmed.includes('locator(') ||
+    /\bawait\s+page\s*\./.test(trimmed) ||
+    /\bpage\.(goto|click|fill|type|waitFor)\s*\(/.test(trimmed) ||
+    (trimmed.includes('test(') && trimmed.includes('async')) ||
+    trimmed.includes('test.describe(');
 
-  if (trimmed.startsWith('[')) {
-    candidates.push('{"steps":' + trimmed + '}');
-  }
-
-  if (trimmed.startsWith('{') && trimmed.includes('"action"')) {
-    const wrapped = '[' + trimmed.replace(/\}\s*,?\s*\{/g, '},{') + ']';
-    candidates.push('{"steps":' + wrapped + '}');
-  }
-
-  if (trimmed.includes('"action"')) {
-    candidates.push(trimmed);
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = robustJsonParse(candidate);
-      if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
-        const valid = parsed.steps.filter((s: any) => typeof s.action === 'string');
-        if (valid.length > 0) {
-          console.log('[AutomationParser] Passos detectados diretamente no input: ' + valid.length);
-          return valid as AutomationStep[];
-        }
+  if (isPlaywrightCode) {
+    const pwSteps: AutomationStep[] = [];
+    const locators: Record<string, string> = {};
+    const lines = trimmed.split('\n').map(l => l.trim());
+    
+    for (const line of lines) {
+      if (!line) continue;
+      
+      // goto
+      let m = line.match(/(?:await\s+)?page\.goto\((['"`])(.*?)\1/);
+      if (m) {
+        pwSteps.push({ action: 'goto', value: m[2], label: `Acessar ${m[2]}` });
+        continue;
       }
-    } catch { /* next */ }
+
+      // waitForLoadState / waitForTimeout / waitForURL / waitForSelector
+      m = line.match(/(?:await\s+)?page\.(waitForLoadState|waitForTimeout|waitForURL|waitForSelector)\(/);
+      if (m) {
+        const ms = m[1] === 'waitForTimeout' ? 2000 : 1500;
+        pwSteps.push({ action: 'wait', milliseconds: ms, label: 'Aguardar carregamento da página' });
+        continue;
+      }
+
+      // locator assignment: const varName = page.locator('selector', ...)
+      m = line.match(/(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*page\.locator\((['"`])(.*?)\2/);
+      if (m) {
+        locators[m[1]] = m[3];
+        continue;
+      }
+
+      // locator assignment: getByPlaceholder
+      m = line.match(/(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*page\.getByPlaceholder\((['"`])(.*?)\2/);
+      if (m) {
+        locators[m[1]] = `input[placeholder="${m[3]}" i], [placeholder*="${m[3]}" i]`;
+        continue;
+      }
+
+      // locator assignment: getByLabel
+      m = line.match(/(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*page\.getByLabel\((['"`])(.*?)\2/);
+      if (m) {
+        locators[m[1]] = `label:has-text("${m[3]}")`;
+        continue;
+      }
+
+      // locator assignment: getByTestId
+      m = line.match(/(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*page\.getByTestId\((['"`])(.*?)\2/);
+      if (m) {
+        locators[m[1]] = `[data-testid="${m[3]}"]`;
+        continue;
+      }
+
+      // getByPlaceholder fill: await page.getByPlaceholder('X').fill('Y')
+      m = line.match(/(?:await\s+)?page\.getByPlaceholder\((['"`])(.*?)\1\)\.fill\((['"`])(.*?)\3\)/);
+      if (m) {
+        const sel = m[2].toLowerCase().includes('email') || m[2].toLowerCase().includes('e-mail')
+          ? `input[type="email"], input[placeholder*="${m[2]}" i], [placeholder*="${m[2]}" i]`
+          : m[2].toLowerCase().includes('senha') || m[2].toLowerCase().includes('password')
+          ? `input[type="password"], input[placeholder*="${m[2]}" i], [placeholder*="${m[2]}" i]`
+          : `input[placeholder*="${m[2]}" i], [placeholder*="${m[2]}" i]`;
+        pwSteps.push({ action: 'type', selectorType: 'css', selector: sel, value: m[4], label: `Preencher campo ${m[2]}` });
+        continue;
+      }
+
+      // getByLabel fill: await page.getByLabel('X').fill('Y')
+      m = line.match(/(?:await\s+)?page\.getByLabel\((['"`])(.*?)\1\)\.fill\((['"`])(.*?)\3\)/);
+      if (m) {
+        pwSteps.push({ action: 'type', selectorType: 'css', selector: `label:has-text("${m[2]}")`, value: m[4], label: `Preencher campo ${m[2]}` });
+        continue;
+      }
+
+      // getByTestId click: await page.getByTestId('X').click()
+      m = line.match(/(?:await\s+)?page\.getByTestId\((['"`])(.*?)\1\)\.click\(/);
+      if (m) {
+        pwSteps.push({ action: 'click', selectorType: 'css', selector: `[data-testid="${m[2]}"]`, value: `[data-testid="${m[2]}"]`, label: `Clicar em ${m[2]}` });
+        continue;
+      }
+
+      // getByPlaceholder click: await page.getByPlaceholder('X').click()
+      m = line.match(/(?:await\s+)?page\.getByPlaceholder\((['"`])(.*?)\1\)\.click\(/);
+      if (m) {
+        pwSteps.push({ action: 'click', selectorType: 'css', selector: `[placeholder="${m[2]}"]`, value: `[placeholder="${m[2]}"]`, label: `Clicar no campo ${m[2]}` });
+        continue;
+      }
+
+      // getByRole click: await page.getByRole('button', { name: 'X' }).click()
+      m = line.match(/(?:await\s+)?page\.getByRole\((['"`])([^'"`]+)\1\s*,\s*\{\s*name:\s*(['"`])([^'"`]+)\3\s*\}\)\.click\(/);
+      if (m) {
+        pwSteps.push({ action: 'click', selectorType: 'role', selector: m[2], value: m[4], label: `Clicar em ${m[2]} ${m[4]}` });
+        continue;
+      }
+
+      // getByRole fill: await page.getByRole('textbox', { name: 'X' }).fill('Y')
+      m = line.match(/(?:await\s+)?page\.getByRole\((['"`])[^'"`]+\1\s*,\s*\{\s*name:\s*(['"`])(.*?)\2\s*\}\)\.fill\((['"`])(.*?)\4\)/);
+      if (m) {
+        pwSteps.push({ action: 'type', selectorType: 'css', selector: `[aria-label="${m[3]}"]`, value: m[5], label: `Preencher campo ${m[3]}` });
+        continue;
+      }
+
+      // getByText click: await page.getByText('X').click()
+      m = line.match(/(?:await\s+)?page\.getByText\((['"`])(.*?)\1\)\.click\(/);
+      if (m) {
+        pwSteps.push({ action: 'click', selectorType: 'text', selector: m[2], value: m[2], label: `Clicar em "${m[2]}"` });
+        continue;
+      }
+
+      // direct page.click('selector'): await page.click('button[data-testid="X"]')
+      m = line.match(/(?:await\s+)?page\.click\((['"`])(.*?)\1\)/);
+      if (m) {
+        pwSteps.push({ action: 'click', selectorType: 'css', selector: m[2], value: m[2], label: `Clicar no elemento ${m[2]}` });
+        continue;
+      }
+
+      // direct page.fill('selector', 'value'): await page.fill('input', 'X')
+      m = line.match(/(?:await\s+)?page\.fill\((['"`])(.*?)\1\s*,\s*(['"`])(.*?)\3\)/);
+      if (m) {
+        pwSteps.push({ action: 'type', selectorType: 'css', selector: m[2], value: m[4], label: `Preencher campo ${m[2]}` });
+        continue;
+      }
+
+      // inline locator fill: await page.locator('...').fill(...)
+      m = line.match(/(?:await\s+)?page\.locator\((['"`])(.*?)\1.*?\)\.fill\((['"`])(.*?)\3\)/);
+      if (m) {
+        pwSteps.push({ action: 'type', selectorType: 'css', selector: m[2], value: m[4], label: 'Preencher campo' });
+        continue;
+      }
+
+      // inline locator click: await page.locator('...').click(...)
+      m = line.match(/(?:await\s+)?page\.locator\((['"`])(.*?)\1.*?\)\.click\(/);
+      if (m) {
+        pwSteps.push({ action: 'click', selectorType: 'css', selector: m[2], value: m[2], label: 'Clicar no elemento' });
+        continue;
+      }
+
+      // variable fill: await varName.fill(...)
+      m = line.match(/(?:await\s+)?([a-zA-Z0-9_]+)\.fill\((['"`])(.*?)\2\)/);
+      if (m && locators[m[1]]) {
+        pwSteps.push({ action: 'type', selectorType: 'css', selector: locators[m[1]], value: m[3], label: 'Preencher campo' });
+        continue;
+      }
+
+      // variable click: await varName.click(...)
+      m = line.match(/(?:await\s+)?([a-zA-Z0-9_]+)\.click\(/);
+      if (m && locators[m[1]]) {
+        pwSteps.push({ action: 'click', selectorType: 'css', selector: locators[m[1]], value: locators[m[1]], label: 'Clicar no elemento' });
+        continue;
+      }
+
+      // assertions / expect are checks on previous steps, not extra interaction steps
+      if (line.includes('expect(')) {
+        continue;
+      }
+    }
+    
+    if (pwSteps.length > 0) {
+      if (pwSteps[0].action !== 'goto' && targetUrl) {
+        pwSteps.unshift({ action: 'goto', value: targetUrl, label: 'Acessar ' + targetUrl });
+      }
+      console.log('[AutomationParser] Parse nativo de Playwright TS/JS: ' + pwSteps.length + ' passos gerados.');
+      return pwSteps;
+    }
   }
+
+  // --- 4. DETERMINISTIC PORTUGUESE ROTEIRO PARSING ---
+  // IMPORTANT: If the text looks like a structured QA plan (has **Passos:** or **Resultado Esperado:**),
+  // skip the deterministic parser and let the AI handle it — the AI generates much richer automation
+  // steps (URL verification, proper assertions, waits) than the simple parser can.
+  const isStructuredQaPlan = /\*{0,2}Passos:?\*{0,2}/i.test(trimmed) || /\*{0,2}Resultado\s+Esperado:?\*{0,2}/i.test(trimmed);
+  if (!isStructuredQaPlan) {
+    const roteiro = parsePortugueseRoteiro(trimmed, targetUrl || 'https://ia.transportes.gov.br/');
+    if (roteiro && roteiro.length > 0) {
+      console.log('[AutomationParser] Parse nativo de Roteiro PT-BR: ' + roteiro.length + ' passos gerados.');
+      return roteiro as unknown as AutomationStep[];
+    }
+  } else {
+    console.log('[AutomationParser] Plano QA estruturado detectado — delegando para IA para geração completa de passos.');
+  }
+
   return null;
 }
 
 // -------------------------------------------------------
-// Deterministic parser: converts numbered PT-BR roteiro
-// steps into SmartStep[] without any AI call.
+// Deterministic parser: converts PT-BR roteiro steps (numbered,
+// bulleted, or plain lines) into SmartStep[] without any AI call.
 // -------------------------------------------------------
 export interface ParsedSmartStep {
   action: AutomationAction;
@@ -216,7 +400,6 @@ export interface ParsedSmartStep {
 
 /**
  * Extracts the quoted text from a step description.
- * e.g. `Clicar no card "Denúncia"` → `Denúncia`
  */
 function extractQuoted(text: string): string | null {
   const m = text.match(/["'\u00ab\u201c\u201d]([^"'\u00bb\u201c\u201d]+)["'\u00bb\u201c\u201d]/);
@@ -232,57 +415,77 @@ function extractUrl(text: string): string | null {
 }
 
 /**
- * Parses a numbered PT-BR QA roteiro into SmartStep[].
- * Returns null if the input is not a human-readable roteiro
- * (e.g. it's raw JSON or Playwright codegen — handled elsewhere).
+ * Parses a PT-BR QA roteiro into SmartStep[].
  */
 export function parsePortugueseRoteiro(
   input: string,
   targetUrl: string
 ): ParsedSmartStep[] | null {
   const trimmed = input.trim();
-
-  // If it starts with JSON characters, skip this parser
+  if (!trimmed) return null;
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return null;
-  // If it contains no numbered steps at all, skip
-  if (!/^\s*\d+\./m.test(trimmed)) return null;
 
-  // Extract all numbered steps (lines starting with "1.", "2.", etc.)
+  // --- PRIORITY: Extract only the **Passos:** section if it exists ---
+  // This prevents "Plano de Ação" documentation phases from being treated as test steps.
+  const passosMatch = trimmed.match(/\*{0,2}Passos:?\*{0,2}\s*\n([\s\S]*?)(?:\n\*{0,2}Resultado\s+Esperado|$)/i);
+  let sourceText = trimmed;
+  if (passosMatch) {
+    sourceText = passosMatch[1].trim();
+    console.log('[AutomationParser] Seção **Passos:** encontrada — usando apenas os passos do teste.');
+  }
+
+  // Extract all step lines (lines starting with numbers "1.", "1 -", "Passo 1:", bullets "- ", "* ", or meaningful action lines)
   const stepLines: string[] = [];
-  const lines = trimmed.split('\n');
-  for (const line of lines) {
-    const m = line.match(/^\s*\d+\.\s+(.+)/);
-    if (m) stepLines.push(m[1].trim());
+  const lines = sourceText.split('\n');
+
+  for (const rawLine of lines) {
+    const l = rawLine.trim();
+    if (!l) continue;
+    if (l.startsWith('**Categoria') || l.startsWith('**Prioridade') || l.startsWith('**Resultado') || l.startsWith('Categoria:') || l.startsWith('Prioridade:') || l.startsWith('**Passos:') || l.startsWith('Passos:')) {
+      continue;
+    }
+    // Skip documentation-style headings like "## Fase 1:" or "**Plano de Ação**"
+    if (/^#{1,3}\s/.test(l) || /^\*\*(?:Fase|Plano|Etapa|Passo\s+\d+\s*[-–:])/i.test(l)) {
+      continue;
+    }
+
+    const numberedMatch = l.match(/^(?:(?:\d+[\.\)\-:]|\bpasso\s*\d+[\.\)\-:]|[-*•])\s*)(.+)/i);
+    if (numberedMatch) {
+      stepLines.push(numberedMatch[1].trim());
+    } else if (/^(?:acessar|navegar|preencher|digitar|inserir|clicar|apertar|pressionar|aguardar|esperar|verificar|validar)\b/i.test(l)) {
+      stepLines.push(l);
+
+    }
   }
 
   if (stepLines.length === 0) return null;
 
   const steps: ParsedSmartStep[] = [];
-
-  // Always start with goto + wait
-  steps.push({ action: 'goto', label: 'Acessar ' + targetUrl, value: targetUrl });
+  let hasInitialGoto = false;
 
   for (const raw of stepLines) {
     const lower = raw.toLowerCase();
 
-    // NAVIGATE / GOTO
+    // 1. NAVIGATE / GOTO
     if (
-      lower.startsWith('navegar') || lower.startsWith('acessar') ||
+      lower.startsWith('acessar') || lower.startsWith('navegar') ||
       lower.startsWith('ir para') || lower.startsWith('abrir') ||
-      lower.startsWith('entrar em') || lower.startsWith('visitar')
+      lower.startsWith('entrar em') || lower.startsWith('visitar') ||
+      lower.startsWith('url')
     ) {
       const url = extractUrl(raw) || targetUrl;
       steps.push({ action: 'goto', label: raw, value: url });
+      hasInitialGoto = true;
       continue;
     }
 
-    // SCROLL
+    // 2. SCROLL
     if (lower.includes('rolar') || lower.includes('scroll')) {
       steps.push({ action: 'scroll', label: raw });
       continue;
     }
 
-    // WAIT
+    // 3. WAIT
     if (lower.startsWith('aguardar') || lower.startsWith('esperar') || lower.startsWith('wait')) {
       const msMatch = raw.match(/(\d+)\s*(ms|milissegundo|segundo)/i);
       const ms = msMatch
@@ -292,61 +495,139 @@ export function parsePortugueseRoteiro(
       continue;
     }
 
-    // HOVER
-    if (lower.startsWith('passar o mouse') || lower.startsWith('hover')) {
-      const quoted = extractQuoted(raw);
-      if (quoted) {
-        steps.push({ action: 'hover', label: raw, selectorType: 'text', selector: quoted, value: quoted });
-      }
+    // 4. VERIFY / ASSERTION (Redirecionamento, Dashboard, Visibilidade)
+    if (
+      lower.startsWith('verificar') || lower.startsWith('validar') ||
+      lower.startsWith('checar') || lower.startsWith('conferir') ||
+      lower.startsWith('garantir') || lower.startsWith('assert') || lower.startsWith('verify')
+    ) {
+      steps.push({ action: 'wait', label: raw, milliseconds: 2000 });
       continue;
     }
 
-    // TYPE / FILL
+    // 5. HOVER
+    if (lower.startsWith('passar o mouse') || lower.startsWith('hover')) {
+      const quoted = extractQuoted(raw) || raw.replace(/^passar o mouse\s+(?:em|no|na|sobre)?\s*/i, '').trim();
+      steps.push({ action: 'hover', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+      continue;
+    }
+
+    // 6. TYPE / FILL
     if (
       lower.startsWith('preencher') || lower.startsWith('digitar') ||
       lower.startsWith('inserir') || lower.startsWith('escrever') ||
+      lower.startsWith('informar') || lower.startsWith('colocar') ||
       lower.startsWith('fill') || lower.startsWith('type')
     ) {
-      const fieldMatch = raw.match(/["'\u201c\u201d]([^"'\u201c\u201d]+)["'\u201c\u201d]\s+com\s+["'\u201c\u201d]([^"'\u201c\u201d]+)["'\u201c\u201d]/i);
+      // Try pattern with quotes: "campo" com "valor"
+      const fieldMatch = raw.match(/["'\u201c\u201d]([^"'\u201c\u201d]+)["'\u201c\u201d]\s+(?:com|de|:|=)\s+["'\u201c\u201d]([^"'\u201c\u201d]+)["'\u201c\u201d]/i);
+      
+      // Try pattern without quotes: Preencher o campo de e-mail com marcos.camargo@transportes.gov.br
+      const unquotedMatch = raw.match(/^(?:preencher|digitar|inserir|escrever|informar|colocar|fill|type)\s+(?:o\s+|a\s+)?(?:campo\s+(?:de\s+|do\s+|da\s+)?)?(.+?)\s+(?:com|de|:|=)\s+(.+)$/i);
+
+      let field = '';
+      let val = '';
+
       if (fieldMatch) {
-        steps.push({ action: 'type', label: raw, selectorType: 'text', selector: fieldMatch[1], value: fieldMatch[2] });
+        field = fieldMatch[1].trim();
+        val = fieldMatch[2].trim();
+      } else if (unquotedMatch) {
+        field = unquotedMatch[1].trim();
+        val = unquotedMatch[2].trim();
       } else {
         const quoted = extractQuoted(raw);
-        if (quoted) steps.push({ action: 'type', label: raw, selectorType: 'text', selector: quoted, value: '' });
+        field = quoted || 'input';
+        val = '';
       }
+
+      const fLower = field.toLowerCase();
+      let selector = '';
+
+      if (fLower.includes('email') || fLower.includes('e-mail') || fLower.includes('usuário') || fLower.includes('usuario') || fLower.includes('login')) {
+        selector = 'input[type="email"], #email, [placeholder*="email" i], input[name*="email" i], input[name*="usuario" i], input[name*="login" i], [placeholder*="usuário" i]';
+      } else if (fLower.includes('senha') || fLower.includes('password') || fLower.includes('pass')) {
+        selector = 'input[type="password"], #senha, [placeholder*="senha" i], input[name*="senha" i], input[name*="password" i], [placeholder*="password" i]';
+      } else {
+        selector = `input[placeholder*="${field}" i], input[name*="${field}" i], input[id*="${field}" i], #${field}, [aria-label*="${field}" i]`;
+      }
+
+      steps.push({
+        action: 'type',
+        label: raw,
+        selectorType: 'css',
+        selector,
+        value: val,
+      });
       continue;
     }
 
-    // CHECK / MARCAR
+    // 7. CHECK / MARCAR
     if (lower.startsWith('marcar') || lower.startsWith('desmarcar') || lower.startsWith('check')) {
-      const quoted = extractQuoted(raw);
-      if (quoted) steps.push({ action: 'check', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+      const quoted = extractQuoted(raw) || raw.replace(/^marcar\s+(?:o|a|no|na)?\s*/i, '').trim();
+      steps.push({ action: 'check', label: raw, selectorType: 'text', selector: quoted, value: quoted });
       continue;
     }
 
-    // SELECT / SELECIONAR
+    // 8. SELECT / SELECIONAR
     if (lower.startsWith('selecionar') || lower.startsWith('escolher')) {
-      const quoted = extractQuoted(raw);
-      if (quoted) steps.push({ action: 'select', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+      const quoted = extractQuoted(raw) || raw.replace(/^selecionar\s+(?:o|a|no|na)?\s*/i, '').trim();
+      steps.push({ action: 'select', label: raw, selectorType: 'text', selector: quoted, value: quoted });
       continue;
     }
 
-    // CLICK (default for everything else)
-    const quoted = extractQuoted(raw);
-    if (quoted) {
-      steps.push({ action: 'click', label: raw, selectorType: 'text', selector: quoted, value: quoted });
+    // 9. CLICK / SUBMETER (Default for actions)
+    const isLoginButton = lower.includes('login') || lower.includes('submeter') || lower.includes('entrar') || lower.includes('acessar');
+    const isSubmitButton = lower.includes('salvar') || lower.includes('confirmar') || lower.includes('enviar') || lower.includes('cadastrar');
+
+    let clickSelector = '';
+    let clickSelectorType: SelectorType = 'text';
+    let clickVal = raw;
+
+    if (isLoginButton) {
+      clickSelector = 'button[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), input[type="submit"]';
+      clickSelectorType = 'css';
+      clickVal = 'login';
+    } else if (isSubmitButton) {
+      clickSelector = 'button[type="submit"], button:has-text("Salvar"), button:has-text("Confirmar"), button:has-text("Enviar"), input[type="submit"]';
+      clickSelectorType = 'css';
+      clickVal = 'confirmar';
     } else {
-      // Strip verb prefix and use the rest as selector hint
-      const selectorHint = raw
-        .replace(/^Clicar\s+(no|na|nos|nas|em|no\s+bot[a\u00e3]o|no\s+link|no\s+card|no\s+menu|no\s+item)\s+/i, '')
-        .replace(/^Clicar\s+/i, '')
-        .trim();
-      steps.push({ action: 'click', label: raw, selectorType: 'text', selector: selectorHint, value: selectorHint });
+      const quoted = extractQuoted(raw);
+      if (quoted) {
+        // Use text selector — much more robust than CSS :has-text()
+        clickSelector = quoted;
+        clickSelectorType = 'text';
+        clickVal = quoted;
+      } else {
+        const hint = raw
+          .replace(/^Clicar\s+(?:no|na|nos|nas|em|no\s+bot[aã]o(?:\s+de|\s+do|\s+da)?|no\s+link|no\s+card|no\s+menu|no\s+item)\s+/i, '')
+          .replace(/^Clicar\s+/i, '')
+          .trim();
+        // Use text selector — much more robust than CSS :has-text()
+        clickSelector = hint;
+        clickSelectorType = 'text';
+        clickVal = hint;
+      }
     }
+
+    steps.push({
+      action: 'click',
+      label: raw,
+      selectorType: clickSelectorType,
+      selector: clickSelector,
+      value: clickVal,
+    });
   }
 
+  // Prepend goto if not already present
+  if (!hasInitialGoto && targetUrl) {
+    steps.unshift({ action: 'goto', label: 'Acessar ' + targetUrl, value: targetUrl });
+  }
+
+  if (steps.length === 0) return null;
+
   console.log(
-    '[AutomationParser] parsePortugueseRoteiro: ' + stepLines.length + ' passos do roteiro \u2192 ' +
+    '[AutomationParser] parsePortugueseRoteiro: ' + stepLines.length + ' passos do roteiro -> ' +
     steps.length + ' steps Playwright gerados deterministicamente.'
   );
   return steps;

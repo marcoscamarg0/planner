@@ -140,19 +140,23 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
     if (!task) return;
     
     const rawCode = (task.metadata?.automationCode as string) || "";
-    if (!rawCode) {
-      alert("Nenhum código de automação encontrado nesta tarefa. Gere a automação primeiro.");
-      return;
-    }
     
-    // Extrai o código caso esteja em bloco de markdown
-    const codeMatch = rawCode.match(/```(?:javascript|typescript)?\n([\s\S]*?)```/);
-    const code = codeMatch ? codeMatch[1] : rawCode;
+    // Tenta extrair a URL do código de automação ou da descrição para usar como sugestão
+    const urlFromCode = rawCode.match(/goto\(['"]([^'"]+)['"]\)/)?.[1];
+    const urlFromDesc = description.match(/https?:\/\/\S+/)?.[0]?.replace(/[.,;:)]$/, '');
+    const suggestedUrl = urlFromCode || urlFromDesc || projectUrl || "http://localhost:3000";
     
-    // Tenta extrair a URL do goto
-    const urlMatch = code.match(/goto\(['"]([^'"]+)['"]\)/);
-    const targetUrl = urlMatch ? urlMatch[1] : prompt("Qual a URL alvo para executar o teste?", projectUrl || "http://localhost:3000");
+    // Sempre pergunta a URL ao usuário — URL extraída aparece como valor padrão
+    const targetUrl = prompt("Qual a URL alvo para executar o teste?", suggestedUrl);
     if (!targetUrl) return;
+
+    // Monta o flowDescription a partir dos passos reais da tarefa (não do código gerado)
+    // Isso garante que o SmartRun gere passos corretos baseados no plano de QA real
+    const flowDescription = [
+      `**Título do Caso de Teste:** ${task.title}`,
+      ``,
+      description.trim(),
+    ].join("\n");
 
     // Altera o status da tarefa para Em Progresso
     if (task.status !== "in_progress") {
@@ -169,7 +173,7 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           targetUrl,
-          flowDescription: code,
+          flowDescription,
           jobName: task.title,
           model: "auto-free",
           includeAxe: false

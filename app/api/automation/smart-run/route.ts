@@ -77,25 +77,17 @@ const SMART_RUN_SYSTEM_PROMPT = [
 // -------------------------------------------------------
 // Etapa 1: gerar passos (IA ou parse direto)
 // -------------------------------------------------------
-async function generateStepsFromDescription(
+export async function generateStepsFromDescription(
   targetUrl: string,
   flowDescription: string,
   model: string,
   contextImages: string[] = []
 ): Promise<SmartStep[]> {
 
-  // --- Prioridade 1: Parser determinístico de roteiro PT-BR (sem IA, sem aleatoriedade) ---
-  const roteiroSteps = parsePortugueseRoteiro(flowDescription, targetUrl);
-  if (roteiroSteps && roteiroSteps.length > 2) {
-    console.log('[SmartRun] Roteiro PT-BR parseado deterministicamente: ' + roteiroSteps.length + ' steps (SEM IA).');
-    return roteiroSteps as unknown as SmartStep[];
-  }
-
-  // --- Prioridade 2: se o input já contém passos JSON/Codegen, usá-los diretamente ---
-  const directSteps = tryParseDirectSteps(flowDescription);
-  if (directSteps) {
-    console.log('[SmartRun] Usando ' + directSteps.length + ' passos do JSON fornecido diretamente (sem IA).');
-    // Normalize: newPage -> wait, screenshot -> wait
+  // --- Prioridade 1: se o input contém passos JSON, Playwright TS/JS ou Roteiro PT-BR ---
+  const directSteps = tryParseDirectSteps(flowDescription, targetUrl);
+  if (directSteps && directSteps.length > 0) {
+    console.log('[SmartRun] Usando ' + directSteps.length + ' passos detectados nativamente (sem IA).');
     return directSteps.map(s => {
       const action = s.action as string;
       if (action === 'newPage' || action === 'screenshot') {
@@ -104,6 +96,9 @@ async function generateStepsFromDescription(
       return s as unknown as SmartStep;
     });
   }
+
+  // Nota: roteiros em texto PT-BR numerados SÃO INTENCIONALMENTE enviados para a IA.
+  // O parsePortugueseRoteiro só é usado como último fallback (quando a IA não está disponível).
 
   const modelMap: Record<string, string> = {
     'auto-free':      'openrouter/auto',
@@ -116,7 +111,7 @@ async function generateStepsFromDescription(
   };
   const llmModel = modelMap[model] || 'openrouter/auto';
 
-  // Build a structured, explicit prompt so the AI maps EVERY numbered step in the roteiro
+  // Build a structured, explicit prompt so the AI maps EVERY numbered step in the roteiro OR translates the script
   const userPrompt = [
     '== CONTEXTO ==',
     'Você está automatizando um caso de teste de QA para a URL: ' + targetUrl,
@@ -125,20 +120,24 @@ async function generateStepsFromDescription(
     flowDescription,
     '',
     '== SUA TAREFA ==',
-    'Leia TODOS os passos numerados acima (ex: "1.", "2.", "3."...) e converta CADA UM em um step JSON do Playwright.',
+    'Leia o roteiro ou script fornecido acima (que pode ser uma lista numerada em texto ou um código Playwright/Typescript) e converta as interações em um array JSON.',
     'REGRAS OBRIGATÓRIAS:',
-    '- Não omita nenhum passo numerado. Se houver 4 passos, gere pelo menos 4 steps de interação.',
-    '- Para cada passo "Clicar em X" -> action:"click", selectorType:"text" ou "role", selector/value = texto do elemento X.',
-    '- Para cada passo "Preencher campo X com Y" -> action:"type", selector = campo X, value = Y.',
-    '- Para cada passo "Navegar para X" / "Acessar X" -> action:"goto", value = URL.',
-    '- Se o resultado esperado menciona abertura de nova aba, inclua action:"closePopups" após o clique para voltar à aba principal.',
+    '- Se for uma lista numerada: Não omita NENHUM passo. Gere um step de interação para cada passo.',
+    '- Se for um código (Playwright, Puppeteer, etc): Extraia cada ação do código (page.goto, click, fill, type, etc) e gere o step correspondente.',
+    '- Para "click" -> action:"click", selectorType:"text" ou "role", selector/value = texto ou seletor do elemento.',
+    '- Para "fill"/"type" -> action:"type", selector = seletor do campo, value = texto preenchido.',
+    '- Para navegação -> action:"goto", value = URL.',
     '- Sempre inclua um action:"wait" de 1500ms após cada clique ou navegação.',
     '- O primeiro step deve ser action:"goto" com a URL: ' + targetUrl,
     '',
-    'Gere EXATAMENTE o JSON com o array "steps" cobrindo TODOS os passos do roteiro.',
+    'Gere EXATAMENTE o JSON com o array "steps" cobrindo TODAS as interações do script ou roteiro.',
   ].join('\n');
 
-  if (!OPENROUTER_API_KEY) {
+  if (!OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) {
+    const roteiroSteps = parsePortugueseRoteiro(flowDescription, targetUrl);
+    if (roteiroSteps && roteiroSteps.length > 0) {
+      return roteiroSteps as unknown as SmartStep[];
+    }
     return [
       { action: 'goto', label: 'Acessar ' + targetUrl, value: targetUrl },
       { action: 'wait', label: 'Aguardar carregamento', milliseconds: 2000 },
@@ -173,7 +172,6 @@ async function generateStepsFromDescription(
         ],
         temperature: 0.1,
         max_tokens: 4000,
-        response_format: { type: 'json_object' },
       }),
     });
 
@@ -217,11 +215,10 @@ async function generateStepsFromDescription(
             model: "llama-3.3-70b-versatile", 
             messages: [
               { role: 'system', content: SMART_RUN_SYSTEM_PROMPT },
-              { role: 'user',   content: typeof userMessageContent === 'string' ? userMessageContent : "Gere os passos baseados nas instruções. Não é possível enviar imagens para este modelo no momento." },
+              { role: 'user',   content: userPrompt + (contextImages?.length > 0 ? '\n\n[Nota: Imagens fornecidas foram omitidas pois este modelo não suporta visão]' : '') },
             ],
             temperature: 0.1, 
             max_tokens: 4000,
-            response_format: { type: 'json_object' }
           }),
         });
         
@@ -244,7 +241,14 @@ async function generateStepsFromDescription(
     }
   }
 
-  // Fallback
+  // --- Último fallback: Parser determinístico de roteiro PT-BR (sem IA) ---
+  const roteiroSteps = parsePortugueseRoteiro(flowDescription, targetUrl);
+  if (roteiroSteps && roteiroSteps.length > 0) {
+    console.log('[SmartRun] Roteiro PT-BR parseado deterministicamente (fallback sem IA): ' + roteiroSteps.length + ' steps.');
+    return roteiroSteps as unknown as SmartStep[];
+  }
+
+  // Fallback mínimo
   return [
     { action: 'goto', label: 'Acessar ' + targetUrl, value: targetUrl },
     { action: 'wait', label: 'Aguardar carregamento', milliseconds: 2000 },
@@ -296,7 +300,7 @@ async function autoAcceptCookies(page: any) {
   } catch { /* ignore */ }
 }
 
-async function runStep(page: any, step: SmartStep, index: number, baseUrl: string): Promise<StepResult> {
+async function runStep(page: any, step: SmartStep, index: number, baseUrl: string, lastScreenshotRef: { hash: string }): Promise<StepResult> {
   const start = Date.now();
   let screenshotBase64: string | undefined;
   let screenshotBeforeBase64: string | undefined;
@@ -322,25 +326,23 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     } catch { /* ignore */ }
   };
 
-  const takeScreenshot = async (pageToShoot?: any, locatorToShoot?: any): Promise<string | undefined> => {
+  const takeScreenshot = async (pageToShoot?: any, locatorToShoot?: any, force = false, fullPage = false): Promise<string | undefined> => {
     try {
       if (locatorToShoot) {
-        // Se temos um elemento específico, tira print só dele
-        const buf = await locatorToShoot.screenshot({ type: 'jpeg', quality: 90, timeout: 8000 });
+        const buf = await locatorToShoot.screenshot({ type: 'jpeg', quality: 95, timeout: 8000 });
         return (buf as Buffer).toString('base64');
       }
 
       const p = pageToShoot || getActivePage();
-      
-      // Traz a aba correta para frente para o screenshot não ficar escondido
       await p.bringToFront().catch(() => {});
 
-      // Aguarda apenas o DOM estar pronto (sem pausa fixa para evitar screenshots duplicados)
+      // Garante que o CSS, fontes e estilos estejam 100% renderizados antes da foto
       await p.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
-      await p.waitForTimeout(600);
+      await p.evaluate(() => document.fonts ? document.fonts.ready : Promise.resolve()).catch(() => {});
+      await p.waitForTimeout(400);
       
-      // Tira o print da aba inteira
-      const buf = await p.screenshot({ type: 'jpeg', quality: 70, timeout: 15000 });
+      // Print em Alta Definição (HD - Quality 95)
+      const buf = await p.screenshot({ type: 'jpeg', quality: 95, fullPage, timeout: 15000 });
       return (buf as Buffer).toString('base64');
     } catch { return undefined; }
   };
@@ -355,11 +357,16 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
 
     if (step.action === 'goto') {
       const dest = step.value || baseUrl;
+      
+      let absoluteDest = dest;
+      try {
+        absoluteDest = new URL(dest, baseUrl).href;
+      } catch { /* ignore */ }
 
       // Check if destination is on a different domain than the base URL
       let isExternal = false;
       try {
-        isExternal = new URL(dest).hostname !== new URL(baseUrl).hostname;
+        isExternal = new URL(absoluteDest).hostname !== new URL(baseUrl).hostname;
       } catch { /* invalid URL, treat as internal */ }
 
       if (isExternal) {
@@ -367,17 +374,41 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
         let externalPage: any;
         try {
           externalPage = await page.context().newPage();
-          await externalPage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-          screenshotBase64 = await takeScreenshot(externalPage);
+          await externalPage.goto(absoluteDest, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          screenshotBase64 = await takeScreenshot(externalPage, undefined, true); // Forçar print por ser aba externa
           await externalPage.close();
         } catch { }
-        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + dest, screenshotBase64, duration: Date.now() - start };
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou (aba externa) para: ' + absoluteDest, screenshotBase64, duration: Date.now() - start };
       }
 
-      await activePage.goto(dest, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      // Strategy 1: load / domcontentloaded
+      let gotoRes = await activePage.goto(absoluteDest, { waitUntil: 'domcontentloaded', timeout: 35000 }).catch((e: any) => e);
+      
+      // Strategy 2: If failed, retry with 'commit' (just waits for first byte)
+      if (gotoRes instanceof Error) {
+        console.log('[SmartRun] Retry com estratégia commit para: ' + absoluteDest);
+        gotoRes = await activePage.goto(absoluteDest, { waitUntil: 'commit', timeout: 20000 }).catch((e: any) => e);
+      }
+
+      if (gotoRes instanceof Error) {
+        // Page failed — capture whatever is visible (might be a partial load or error page)
+        screenshotBase64 = await takeScreenshot(activePage, undefined, true).catch(() => undefined);
+        return { 
+          index, label: step.label, 
+          status: 'falha_clique', 
+          detalhe: 'Falha ao carregar ' + absoluteDest + ' — ' + gotoRes.message.split('\n')[0], 
+          screenshotBase64,
+          duration: Date.now() - start 
+        };
+      }
+      
       await autoAcceptCookies(activePage);
-      screenshotBase64 = await takeScreenshot(activePage);
-      return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + dest, screenshotBase64, duration: Date.now() - start };
+      // Aguarda carregar as fontes e folhas de estilo CSS
+      await activePage.evaluate(() => document.fonts ? document.fonts.ready : Promise.resolve()).catch(() => {});
+      await activePage.waitForTimeout(800);
+
+      screenshotBase64 = await takeScreenshot(activePage, undefined, true);
+      return { index, label: step.label, status: 'aprovado', detalhe: 'Navegou para: ' + absoluteDest, screenshotBase64, duration: Date.now() - start };
     }
 
     if (step.action === 'wait') {
@@ -417,14 +448,17 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
 
     // If the original page somehow ended up on an external domain, navigate back
     try {
-      const currentHost = new URL(page.url()).hostname;
-      const baseHost = new URL(baseUrl).hostname;
-      if (currentHost !== baseHost) {
-        console.log('[SmartRun] Página original saiu do domínio (' + currentHost + '), voltando para ' + baseUrl);
-        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-        await page.waitForTimeout(1000);
+      const pageUrl = page.url();
+      if (pageUrl && !pageUrl.startsWith('chrome-error:') && !pageUrl.startsWith('about:')) {
+        const currentHost = new URL(pageUrl).hostname;
+        const baseHost = new URL(baseUrl).hostname;
+        if (currentHost && baseHost && currentHost !== baseHost && currentHost !== 'chromewebdata') {
+          console.log('[SmartRun] Página original saiu do domínio (' + currentHost + '), voltando para ' + baseUrl);
+          await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          await page.waitForTimeout(1000);
+        }
       }
-    } catch { /* ignore — url might be about:blank */ }
+    } catch { /* ignore */ }
 
     // Helper: build a locator for a step on a given page
     const buildLocator = (p: any) => {
@@ -448,11 +482,54 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       locator = tempLoc;
     }
 
-    // Fallback: try getByText if role search failed
+    // Fallback 1: try getByText if role search failed
     if (!locator && step.selectorType === 'role' && step.value) {
       let fallbackLoc = activePage.getByText(step.value, { exact: false }).first();
       if (await fallbackLoc.count().catch(() => 0) > 0) {
         locator = fallbackLoc;
+      }
+    }
+
+    // Fallback 2: try generic CSS attributes (aria-label, title, alt) for icons/links
+    if (!locator && step.value) {
+      // Escape quotes in step.value just in case
+      const safeValue = step.value.replace(/"/g, '\\"');
+      const cssFallback = `[aria-label*="${safeValue}" i], [title*="${safeValue}" i], img[alt*="${safeValue}" i], a:has-text("${safeValue}")`;
+      let fb = activePage.locator(cssFallback).first();
+      if (await fb.count().catch(() => 0) > 0) {
+         locator = fb;
+      }
+    }
+
+    // Fallback 3: Semantic Fallbacks for Login fields (Email, Senha, Botão Entrar)
+    if (!locator || (await locator.count().catch(() => 0)) === 0) {
+      const stepText = ((step.selector || '') + ' ' + (step.label || '') + ' ' + (step.value || '')).toLowerCase();
+
+      if (step.action === 'type') {
+        if (stepText.includes('email') || stepText.includes('e-mail') || stepText.includes('usuario') || stepText.includes('usuário') || stepText.includes('login')) {
+          const emailFb = activePage.locator('input[type="email"], input[name*="email" i], input[name*="user" i], input[name*="login" i], input[placeholder*="email" i], input[placeholder*="e-mail" i], input[id*="email" i], input[id*="user" i]').first();
+          if (await emailFb.count().catch(() => 0) > 0) {
+            locator = emailFb;
+          } else {
+            // First available text input on the page
+            const firstInput = activePage.locator('input[type="text"], input:not([type="password"]):not([type="submit"]):not([type="button"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"])').first();
+            if (await firstInput.count().catch(() => 0) > 0) {
+              locator = firstInput;
+            }
+          }
+        } else if (stepText.includes('senha') || stepText.includes('password') || stepText.includes('pass')) {
+          const passFb = activePage.locator('input[type="password"], input[name*="pass" i], input[name*="senha" i], input[placeholder*="senha" i], input[placeholder*="password" i], input[id*="pass" i], input[id*="senha" i]').first();
+          if (await passFb.count().catch(() => 0) > 0) {
+            locator = passFb;
+          }
+        }
+      } else if (step.action === 'click') {
+        if (stepText.includes('entrar') || stepText.includes('login') || stepText.includes('submeter') || stepText.includes('acessar') || stepText.includes('plataforma')) {
+          const btnFb = activePage.locator('button:has-text("Entrar na plataforma"), button:has-text("Entrar"), button:has-text("Login"), button:has-text("Acessar"), button[type="submit"], input[type="submit"], [data-testid*="login" i], [data-testid*="submit" i]').first();
+          if (await btnFb.count().catch(() => 0) > 0) {
+            locator = btnFb;
+          }
+        }
       }
     }
 
@@ -505,8 +582,9 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     await activePage.waitForTimeout(400);
 
     // Evidência do estado ANTES da ação (página inteira com o highlight aplicado)
+    // Usa targetPage (página onde o elemento foi encontrado) — não activePage (sempre a original)
     if (step.action !== 'type' && step.action !== 'hover') {
-      screenshotBeforeBase64 = await takeScreenshot(activePage);
+      screenshotBeforeBase64 = await takeScreenshot(targetPage);
       
       // Também capturamos o elemento pequeno opcionalmente
       const buf = await locator.screenshot({ type: 'jpeg', quality: 80, timeout: 5000 }).catch(() => null);
@@ -527,6 +605,8 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     if (step.action === 'type') {
       await locator.fill(step.value || '', { timeout: 15000 });
       await targetPage.waitForTimeout(500);
+      // Capture full-page evidence after filling (highlight the filled field)
+      screenshotBase64 = await takeScreenshot(targetPage, undefined, true);
     } else if (step.action === 'hover') {
       await locator.hover({ timeout: 15000 });
       await targetPage.waitForTimeout(600);
@@ -643,7 +723,8 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
     }
 
     // Real failure — close extra tabs and recover
-    screenshotBase64 = screenshotBase64 || await takeScreenshot(page).catch(() => undefined);
+    // Force a full-page screenshot on failure to provide better context
+    screenshotBase64 = screenshotBase64 || await takeScreenshot(page, undefined, false, true).catch(() => undefined);
     try {
       await closeExtraTabs();
       const currentUrl = page.url();
@@ -682,21 +763,26 @@ export async function POST(req: Request) {
       if (!user) throw new Error('Nao autorizado');
 
       const body = await req.json();
-      const { targetUrl, flowDescription, jobName, model = 'auto-free', includeAxe = true, contextImages = [], testType = 'smart_ai' } = body;
+      const { targetUrl, flowDescription, jobName, model = 'auto-free', includeAxe = true, contextImages = [], testType = 'smart_ai', preCompiledSteps } = body;
 
       if (!targetUrl) {
         throw new Error('targetUrl é obrigatorio');
       }
-      if (testType === 'smart_ai' && !flowDescription) {
-        throw new Error('flowDescription é obrigatorio para testes de IA');
+      if (testType === 'smart_ai' && !flowDescription && !preCompiledSteps) {
+        throw new Error('flowDescription ou preCompiledSteps é obrigatorio para testes de IA');
       }
 
       await logToStream(`[SmartRun] Iniciando teste (${testType}) para: ` + targetUrl);
       
       let steps: SmartStep[] = [];
       if (testType === 'smart_ai') {
-        steps = await generateStepsFromDescription(targetUrl, flowDescription, model, contextImages);
-        await logToStream('[SmartRun] ' + steps.length + ' passos gerados pela IA.');
+        if (preCompiledSteps && Array.isArray(preCompiledSteps)) {
+          steps = preCompiledSteps;
+          await logToStream('[SmartRun] Usando ' + steps.length + ' passos pré-compilados e validados pelo usuário.');
+        } else {
+          steps = await generateStepsFromDescription(targetUrl, flowDescription, model, contextImages);
+          await logToStream('[SmartRun] ' + steps.length + ' passos extraídos/gerados.');
+        }
       }
       
       const typeLabelMap: Record<string, string> = {
@@ -730,16 +816,37 @@ export async function POST(req: Request) {
       const chromium = await getChromium();
       browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--ignore-certificate-errors',
+          '--ignore-ssl-errors',
+          '--font-render-hinting=medium',
+          '--enable-font-antialiasing',
+        ],
       });
 
       const context = await browser.newContext({
         locale: 'pt-BR',
         timezoneId: 'America/Sao_Paulo',
-        colorScheme: 'light',
         ignoreHTTPSErrors: true,
         bypassCSP: true,
-        viewport: { width: 1280, height: 800 },
+        viewport: { width: 1366, height: 850 },
+        deviceScaleFactor: 2, // 2x Retina / Alta Definição para prints perfeitos e nítidos
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        extraHTTPHeaders: {
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        },
+      });
+
+      // Remove navigator.webdriver fingerprint
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        (window as any).chrome = { runtime: {} };
       });
 
       const page = await context.newPage();
@@ -795,11 +902,17 @@ export async function POST(req: Request) {
       }
 
       const stepResults: StepResult[] = [];
+      const lastScreenshotRef = { hash: '' };
 
       if (testType === 'smart_ai') {
+        // Garantir que a página está na URL alvo antes de rodar os passos se o primeiro passo não for um goto
+        if (steps.length > 0 && steps[0].action !== 'goto') {
+          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        }
+
         for (let i = 0; i < steps.length; i++) {
           await logToStream('[SmartRun] Passo ' + (i + 1) + '/' + steps.length + ': ' + steps[i].label);
-          const r = await runStep(page, steps[i], i + 1, targetUrl);
+          const r = await runStep(page, steps[i], i + 1, targetUrl, lastScreenshotRef);
           await logToStream(' -> ' + (r.status === 'aprovado' ? 'Aprovado' : 'Falhou') + ' - ' + r.detalhe);
           stepResults.push(r);
         }
