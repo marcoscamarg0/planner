@@ -175,6 +175,7 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
           targetUrl,
           flowDescription,
           jobName: task.title,
+          project_id: task.project_id,
           model: "auto-free",
           includeAxe: false
         })
@@ -200,8 +201,13 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
               setRunLogs(prev => [...prev, parsed.message || ""]);
             } else if (parsed.type === "result") {
               setRunResult(parsed.data);
-              // Salva permanentemente o resultado da execução na tarefa!
-              const newMetadata = { ...(task.metadata || {}), lastRunResult: parsed.data };
+              // Salva permanentemente o resultado da execução e a evidência na tarefa!
+              const evidenceToSave = parsed.data?.finalScreenshot || parsed.data?.steps?.find((s: any) => s.screenshotBase64)?.screenshotBase64;
+              const newMetadata = { 
+                ...(task.metadata || {}), 
+                lastRunResult: parsed.data,
+                ...(evidenceToSave ? { evidence: evidenceToSave } : {})
+              };
               updateField({ metadata: newMetadata });
             } else if (parsed.type === "error") {
               setRunLogs(prev => [...prev, "ERRO: " + parsed.error]);
@@ -213,6 +219,46 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
       setRunLogs(prev => [...prev, "Falha na execução: " + e.message]);
     } finally {
       setRunning(false);
+    }
+  };
+
+  const handleEvidenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !task) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      const newMetadata = { ...(task.metadata || {}), evidence: base64 };
+      await updateField({ metadata: newMetadata });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const handleRemoveEvidence = async () => {
+    if (!task) return;
+    const newMetadata = { ...(task.metadata || {}) };
+    delete newMetadata.evidence;
+    await updateField({ metadata: newMetadata });
+  };
+
+  // Suporte a colar print (Ctrl+V) direto no painel da tarefa
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items || !task) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const base64 = reader.result as string;
+            const newMetadata = { ...(task.metadata || {}), evidence: base64 };
+            await updateField({ metadata: newMetadata });
+          };
+          reader.readAsDataURL(file);
+        }
+      }
     }
   };
 
@@ -397,17 +443,61 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
                 </div>
               )}
               
-              {task.metadata?.evidence && (
-                <div className="mt-4 pt-4 border-t border-border/50">
-                  <div className="flex items-center gap-2 mb-3">
+              {/* Seção de Evidências */}
+              <div className="mt-4 pt-4 border-t border-border/50" onPaste={handlePaste}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
                     <ImageIcon className="w-4 h-4 text-sky-500" />
-                    <h3 className="text-sm font-semibold text-foreground">Evidência Anexada</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Evidência / Screenshot do Teste</h3>
                   </div>
-                  <div className="relative rounded-lg overflow-hidden border border-border bg-black/25 flex justify-center items-center">
-                    <img src={task.metadata.evidence as string} alt="Evidência" className="max-h-48 object-contain" />
+                  <div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="evidence-upload-input"
+                      className="hidden"
+                      onChange={handleEvidenceUpload}
+                    />
+                    <label
+                      htmlFor="evidence-upload-input"
+                      className="cursor-pointer text-xs font-semibold px-2.5 py-1 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20 transition-all inline-flex items-center gap-1.5"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      {task.metadata?.evidence ? "Trocar Evidência" : "Anexar Print (ou Ctrl+V)"}
+                    </label>
                   </div>
                 </div>
-              )}
+
+                {task.metadata?.evidence ? (
+                  <div className="relative group rounded-xl overflow-hidden border border-border bg-black/40 flex justify-center items-center p-2">
+                    <img 
+                      src={
+                        String(task.metadata.evidence).startsWith("http") || String(task.metadata.evidence).startsWith("data:image")
+                          ? (task.metadata.evidence as string)
+                          : `data:image/jpeg;base64,${task.metadata.evidence}`
+                      } 
+                      alt="Evidência" 
+                      className="max-h-64 object-contain rounded-lg" 
+                    />
+                    <button
+                      onClick={handleRemoveEvidence}
+                      title="Remover evidência"
+                      className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/70 text-rose-400 hover:bg-rose-500 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => document.getElementById("evidence-upload-input")?.click()}
+                    className="border-2 border-dashed border-border/60 hover:border-sky-500/50 rounded-xl p-4 text-center cursor-pointer transition-all bg-accent/20 hover:bg-accent/40"
+                  >
+                    <p className="text-xs text-muted-foreground">
+                      📸 Clique para anexar screenshot ou <strong>pressione Ctrl+V</strong> aqui para colar
+                    </p>
+                  </div>
+                )}
+              </div>
 
               {/* Console de Execução */}
               {(running || runLogs.length > 0 || runResult) && (
@@ -429,11 +519,43 @@ export function TaskDetailPane({ taskId, onClose, tasks, onTasksChange, projectU
                       </div>
                     )}
                     {runResult && (
-                      <div className="mt-4 pt-3 border-t border-sky-500/20 text-emerald-400 flex flex-col gap-2">
-                        <div className="flex items-center gap-1.5 font-semibold text-sm">
-                          <CheckCircle2 className="w-4 h-4" /> Execução concluída!
-                        </div>
-                        <div className="flex flex-wrap gap-2">
+                      <div className="mt-4 pt-3 border-t border-sky-500/20 flex flex-col gap-2">
+                        {runResult.success ? (
+                          <div className="flex items-center gap-1.5 font-semibold text-sm text-emerald-400">
+                            <CheckCircle2 className="w-4 h-4" /> Automação aprovada com sucesso!
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl space-y-2">
+                            <div className="flex items-center gap-1.5 font-semibold text-xs text-rose-400">
+                              ⚠️ A automação não concluiu todos os passos.
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap pt-1 font-sans">
+                              <button
+                                onClick={() => window.open(projectUrl || "http://localhost:3000", "_blank")}
+                                className="px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-semibold rounded transition-colors"
+                              >
+                                🔗 Abrir Site para Testar Manualmente
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  const newMeta = { 
+                                    ...(task.metadata || {}), 
+                                    manualStatus: "approved",
+                                    manualApprovedAt: new Date().toISOString()
+                                  };
+                                  delete (newMeta as any).automationCode;
+                                  await updateField({ status: "done", metadata: newMeta });
+                                  alert("Teste aprovado manualmente!");
+                                }}
+                                className="px-2.5 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-semibold rounded transition-colors"
+                              >
+                                ✓ Marcar como Aprovado Manualmente
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2 pt-1">
                           {runResult.pdfUrl && (
                             <a href={runResult.pdfUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 bg-emerald-500/20 px-2 py-1 rounded text-emerald-400 hover:bg-emerald-500/30 transition-colors font-sans">
                               <FileText className="w-3.5 h-3.5" /> PDF

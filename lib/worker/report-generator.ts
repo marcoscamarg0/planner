@@ -237,19 +237,29 @@ export function buildReportHtml(opts: ReportOptions): string {
     `
     : '';
 
+  const seenReportHashes = new Set<string>();
+  const getImageHash = (img: string | undefined | null) => img ? `${img.length}_${img.slice(60, 120)}` : '';
+
   const passosHtml = displayResults.map((r, pos) => {
     const info = getStatusInfo(r.status as StatusBotao);
     const numPasso = pos + 1;
     const resultadoEsperado = buildResultadoEsperado(r);
     const evidenciaFuncional = buildEvidenciaFuncional(r, r.index);
 
-    const hasAnyImage = r.screenshotBase64 || r.screenshotBeforeBase64 || r.screenshotElementBase64;
+    const afterHash = getImageHash(r.screenshotBase64);
+    const isDuplicateAfter = afterHash && seenReportHashes.has(afterHash);
+    if (afterHash && !isDuplicateAfter) {
+      seenReportHashes.add(afterHash);
+    }
+    const screenshotAfterToRender = isDuplicateAfter ? undefined : r.screenshotBase64;
+
+    const hasAnyImage = screenshotAfterToRender || r.screenshotBeforeBase64 || r.screenshotElementBase64;
     let imagemHtml = '';
     
     if (!hasAnyImage) {
       imagemHtml = `<div class="sem-evidencia" style="color: #64748b; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" y1="5" x2="22" y2="5"/><line x1="19" y1="2" x2="19" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-        ↳ Tela inalterada (sem mudanças visuais nesta ação)
+        ↳ Tela inalterada (sem mudanças visuais redundantes nesta ação)
       </div>`;
     } else {
       imagemHtml = `<div style="display: flex; flex-direction: column; gap: 20px; width: 100%;">`;
@@ -275,12 +285,12 @@ export function buildReportHtml(opts: ReportOptions): string {
       }
 
       // DEPOIS
-      if (r.screenshotBase64) {
+      if (screenshotAfterToRender) {
         imagemHtml += `
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="font-size: 13px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">🎯 Resultado da Ação</div>
             <div style="position: relative; width: 100%;">
-              <img src="data:image/jpeg;base64,${r.screenshotBase64}" class="evidencia-img" alt="Resultado Passo #${r.index}">
+              <img src="data:image/jpeg;base64,${screenshotAfterToRender}" class="evidencia-img" alt="Resultado Passo #${r.index}">
             </div>
           </div>
         `;

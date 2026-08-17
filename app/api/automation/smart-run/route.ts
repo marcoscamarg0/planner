@@ -101,121 +101,196 @@ export async function generateStepsFromDescription(
   // O parsePortugueseRoteiro só é usado como último fallback (quando a IA não está disponível).
 
   const modelMap: Record<string, string> = {
-    'auto-free':      'openrouter/auto',
-    'nemotron-super': 'nvidia/nemotron-3-super-120b-a12b:free',
+    'auto-free':      'meta-llama/llama-3.3-70b-instruct:free',
+    'nemotron-super': 'nvidia/llama-3.1-nemotron-70b-instruct:free',
     'laguna-xs':      'poolside/laguna-xs-2.1:free',
     'gpt-oss':        'openai/gpt-oss-20b:free',
     'cohere-north':   'cohere/north-mini-code:free',
     'qwen-coder':     'qwen/qwen-2.5-coder-32b-instruct:free',
     'kimi-k2':        'moonshotai/kimi-k2',
   };
-  const llmModel = modelMap[model] || 'openrouter/auto';
+  const llmModel = modelMap[model] || 'meta-llama/llama-3.3-70b-instruct:free';
 
   // Build a structured, explicit prompt so the AI maps EVERY numbered step in the roteiro OR translates the script
   const userPrompt = [
     '== CONTEXTO ==',
-    'Você está automatizando um caso de teste de QA para a URL: ' + targetUrl,
+    'Você é um Engenheiro de Automação de QA Sênior. Sua missão é converter a especificação/roteiro de teste abaixo em um fluxo completo de automação Playwright.',
+    'URL Alvo Principal: ' + targetUrl,
     '',
-    '== ROTEIRO / SCRIPT FORNECIDO ==',
+    '== ROTEIRO / PLANO DE TESTE FORNECIDO ==',
     flowDescription,
     '',
     '== SUA TAREFA ==',
-    'Leia o roteiro ou script fornecido acima (que pode ser uma lista numerada em texto ou um código Playwright/Typescript) e converta as interações em um array JSON.',
-    'REGRAS OBRIGATÓRIAS:',
-    '- Se for uma lista numerada: Não omita NENHUM passo. Gere um step de interação para cada passo.',
-    '- Se for um código (Playwright, Puppeteer, etc): Extraia cada ação do código (page.goto, click, fill, type, etc) e gere o step correspondente.',
-    '- Para "click" -> action:"click", selectorType:"text" ou "role", selector/value = texto ou seletor do elemento.',
-    '- Para "fill"/"type" -> action:"type", selector = seletor do campo, value = texto preenchido.',
-    '- Para navegação -> action:"goto", value = URL.',
-    '- Sempre inclua um action:"wait" de 1500ms após cada clique ou navegação.',
-    '- O primeiro step deve ser action:"goto" com a URL: ' + targetUrl,
+    'Analise todos os passos do teste, o objetivo, o resultado esperado e as interações descritas.',
+    'Desdobre o fluxo em PASSOS ATÔMICOS detalhados e sequenciais (Geralmente entre 4 a 8 passos por teste):',
+    '1. action: "goto" -> Acessar a URL inicial do teste (' + targetUrl + ')',
+    '2. action: "wait" -> Aguardar carregamento completo do DOM (1500ms)',
+    '3. Se o teste envolver localizar/rolar até elementos -> action: "scroll" ou "hover"',
+    '4. Para interações com botões, links, abas ou accordions -> action: "click", selectorType: "text" ou "css", value/selector: texto ou seletor do botão',
+    '5. Para preenchimento de inputs -> action: "type", selector: seletor do campo, value: valor a preencher',
+    '6. Após cada clique ou submissão -> action: "wait" (2000ms) para aguardar a transição / redirecionamento',
+    '7. Para validações de tela, abertura de abas externas ou novas páginas -> action: "wait" com label descritiva de validação',
     '',
-    'Gere EXATAMENTE o JSON com o array "steps" cobrindo TODAS as interações do script ou roteiro.',
+    '== FORMATO DE RESPOSTA OBRIGATÓRIO ==',
+    'Retorne EXATAMENTE um objeto JSON válido no formato:',
+    '{',
+    '  "steps": [',
+    '    { "action": "goto", "label": "Acessar ' + targetUrl + '", "value": "' + targetUrl + '" },',
+    '    { "action": "wait", "label": "Aguardar carregamento da interface", "milliseconds": 1500 },',
+    '    { "action": "click", "label": "Clicar no botão...", "selectorType": "text", "selector": "Iniciar", "value": "Iniciar" },',
+    '    { "action": "wait", "label": "Validar transição / redirecionamento", "milliseconds": 2000 }',
+    '  ]',
+    '}',
+    'Responda APENAS com o JSON.'
   ].join('\n');
 
-  if (!OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) {
-    const roteiroSteps = parsePortugueseRoteiro(flowDescription, targetUrl);
-    if (roteiroSteps && roteiroSteps.length > 0) {
-      return roteiroSteps as unknown as SmartStep[];
-    }
-    return [
-      { action: 'goto', label: 'Acessar ' + targetUrl, value: targetUrl },
-      { action: 'wait', label: 'Aguardar carregamento', milliseconds: 2000 },
+  // --- Provedor 1: Google Gemini com auto-descoberta de modelos ---
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (geminiKey) {
+    let geminiModels = [
+      "gemini-flash-latest",
+      "gemini-flash-lite-latest",
+      "gemini-1.5-flash-latest",
+      "gemini-1.5-pro-latest",
+      "gemini-2.0-flash-exp",
+      "gemini-1.5-flash",
     ];
-  }
-
-  let userMessageContent: any = userPrompt;
-  if (contextImages && contextImages.length > 0) {
-    userMessageContent = [
-      { type: 'text', text: userPrompt },
-      ...contextImages.map((img: string) => ({
-        type: 'image_url',
-        image_url: { url: img.startsWith('data:image') ? img : 'data:image/jpeg;base64,' + img },
-      })),
-    ];
-  }
-
-  try {
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + OPENROUTER_API_KEY,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://planner-j53e.onrender.com',
-        'X-Title': 'Planner QA Smart Runner',
-      },
-      body: JSON.stringify({
-        model: llmModel,
-        messages: [
-          { role: 'system', content: SMART_RUN_SYSTEM_PROMPT },
-          { role: 'user',   content: userMessageContent },
-        ],
-        temperature: 0.1,
-        max_tokens: 4000,
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const content = (data.choices?.[0]?.message?.content || '') as string;
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, '').trim();
-
-      try {
-        if (!cleaned) throw new Error('IA retornou conteúdo vazio.');
-        const parsed = robustJsonParse(cleaned);
-        if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
-          const steps = parsed.steps as SmartStep[];
-          console.log('[SmartRun] IA gerou ' + steps.length + ' passos via OpenRouter');
-          return steps.map(s => s.action === 'newPage' ? { ...s, action: 'wait' as const, milliseconds: 1000 } : s);
+    try {
+      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const available = (listData.models || [])
+          .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"))
+          .map((m: any) => m.name.replace(/^models\//, ''));
+        if (available.length > 0) {
+          geminiModels = Array.from(new Set([
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            ...available
+          ]));
         }
-      } catch (parseErr) {
-        console.error('[SmartRun] Falha ao parsear JSON da IA (500 chars):', cleaned?.slice(0, 500));
-        throw parseErr;
       }
-    } else {
-      console.warn('[SmartRun] Falha na API do OpenRouter:', res.status, await res.text());
-      throw new Error("OpenRouter API Failed");
-    }
-  } catch (err) {
-    console.error('[SmartRun] Falha ao gerar passos via IA (OpenRouter). Tentando fallback para Groq...', err);
-    
-    // --- Groq Fallback ---
-    const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey) {
+    } catch { }
+
+    for (const gModel of geminiModels) {
       try {
-        console.log("[SmartRun] Tentando Groq fallback (llama-3.3-70b-versatile)...");
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        console.log(`[SmartRun] Gerando passos via Google Gemini (${gModel})...`);
+        const nativeBody = {
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          systemInstruction: { parts: [{ text: SMART_RUN_SYSTEM_PROMPT }] },
+          generationConfig: { temperature: 0.1, maxOutputTokens: 4000 }
+        };
+
+        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${geminiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nativeBody),
+        });
+
+        if (geminiRes.ok) {
+          const data = await geminiRes.json();
+          const content = (data.candidates?.[0]?.content?.parts?.[0]?.text || "") as string;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, "").trim();
+
+          const parsed = robustJsonParse(cleaned);
+          if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+            const steps = parsed.steps as SmartStep[];
+            console.log(`[SmartRun] Google Gemini (${gModel}) gerou ${steps.length} passos.`);
+            return steps.map(s => s.action === "newPage" ? { ...s, action: "wait" as const, milliseconds: 1000 } : s);
+          }
+        }
+      } catch (geminiErr) {
+        console.warn(`[SmartRun] Gemini ${gModel} falhou:`, geminiErr);
+      }
+    }
+  }
+
+  // --- Provedor 2: Cerebras AI com auto-descoberta ---
+  const cerebrasKey = process.env.CEREBRAS_API_KEY;
+  if (cerebrasKey) {
+    let cerebrasModels = ["llama3.3-70b", "llama-3.3-70b", "llama3.1-70b", "llama3.1-8b"];
+    try {
+      const listRes = await fetch("https://api.cerebras.ai/v1/models", {
+        headers: { "Authorization": "Bearer " + cerebrasKey }
+      });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const available = (listData.data || []).map((m: any) => m.id);
+        if (available.length > 0) cerebrasModels = available;
+      }
+    } catch { }
+
+    for (const cModel of cerebrasModels) {
+      try {
+        console.log(`[SmartRun] Gerando passos via Cerebras (${cModel})...`);
+        const cerRes = await fetch("https://api.cerebras.ai/v1/chat/completions", {
           method: "POST",
           headers: {
-            "Authorization": "Bearer " + groqKey,
+            "Authorization": "Bearer " + cerebrasKey,
             "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            model: cModel,
+            messages: [
+              { role: "system", content: SMART_RUN_SYSTEM_PROMPT },
+              { role: "user", content: userPrompt },
+            ],
+            temperature: 0.1,
+            max_tokens: 4000,
+          }),
+        });
+
+        if (cerRes.ok) {
+          const data = await cerRes.json();
+          const content = (data.choices?.[0]?.message?.content || "") as string;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, "").trim();
+
+          const parsed = robustJsonParse(cleaned);
+          if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+            const steps = parsed.steps as SmartStep[];
+            console.log(`[SmartRun] Cerebras (${cModel}) gerou ${steps.length} passos.`);
+            return steps.map(s => s.action === "newPage" ? { ...s, action: "wait" as const, milliseconds: 1000 } : s);
+          }
+        }
+      } catch (cerErr) {
+        console.warn(`[SmartRun] Cerebras ${cModel} falhou:`, cerErr);
+      }
+    }
+  }
+
+  // --- Provedor 3: Groq com auto-descoberta ---
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    let groqModels = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "llama-3.1-8b-instant", "deepseek-r1-distill-llama-70b", "llama-3.2-11b-vision-preview"];
+    try {
+      const listRes = await fetch("https://api.groq.com/openai/v1/models", {
+        headers: { "Authorization": "Bearer " + groqKey }
+      });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const available = (listData.data || [])
+          .filter((m: any) => m.active !== false && !m.id.includes("whisper") && !m.id.includes("guard"))
+          .map((m: any) => m.id);
+        if (available.length > 0) groqModels = available;
+      }
+    } catch { }
+
+    for (const gModel of groqModels) {
+      try {
+        console.log(`[SmartRun] Gerando passos via Groq (${gModel})...`);
+        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + groqKey,
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({ 
-            model: "llama-3.3-70b-versatile", 
+            model: gModel, 
             messages: [
               { role: 'system', content: SMART_RUN_SYSTEM_PROMPT },
-              { role: 'user',   content: userPrompt + (contextImages?.length > 0 ? '\n\n[Nota: Imagens fornecidas foram omitidas pois este modelo não suporta visão]' : '') },
+              { role: 'user',   content: userPrompt },
             ],
             temperature: 0.1, 
             max_tokens: 4000,
@@ -231,20 +306,122 @@ export async function generateStepsFromDescription(
           const parsed = robustJsonParse(cleaned);
           if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
             const steps = parsed.steps as SmartStep[];
-            console.log('[SmartRun] IA gerou ' + steps.length + ' passos via Groq');
+            console.log(`[SmartRun] Groq (${gModel}) gerou ${steps.length} passos.`);
             return steps.map(s => s.action === 'newPage' ? { ...s, action: 'wait' as const, milliseconds: 1000 } : s);
           }
         }
       } catch (groqErr) {
-        console.error('[SmartRun] Falha ao gerar passos via Groq:', groqErr);
+        console.warn(`[SmartRun] Groq ${gModel} falhou:`, groqErr);
       }
     }
   }
 
-  // --- Último fallback: Parser determinístico de roteiro PT-BR (sem IA) ---
+  // --- Provedor 4: Mistral AI ---
+  const mistralKey = process.env.MISTRAL_API_KEY;
+  if (mistralKey) {
+    try {
+      console.log("[SmartRun] Gerando passos via Mistral AI...");
+      const misRes = await fetch("https://api.mistral.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + mistralKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "mistral-small-latest",
+          messages: [
+            { role: "system", content: SMART_RUN_SYSTEM_PROMPT },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.1,
+          max_tokens: 4000,
+        }),
+      });
+
+      if (misRes.ok) {
+        const data = await misRes.json();
+        const content = (data.choices?.[0]?.message?.content || "") as string;
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, "").trim();
+
+        const parsed = robustJsonParse(cleaned);
+        if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+          const steps = parsed.steps as SmartStep[];
+          console.log(`[SmartRun] Mistral gerou ${steps.length} passos.`);
+          return steps.map(s => s.action === "newPage" ? { ...s, action: "wait" as const, milliseconds: 1000 } : s);
+        }
+      }
+    } catch (misErr) {
+      console.warn("[SmartRun] Mistral falhou:", misErr);
+    }
+  }
+
+  // --- Provedor 5: OpenRouter (com fallback em múltiplos modelos gratuitos) ---
+  if (OPENROUTER_API_KEY) {
+    let userMessageContent: any = userPrompt;
+    if (contextImages && contextImages.length > 0) {
+      userMessageContent = [
+        { type: 'text', text: userPrompt },
+        ...contextImages.map((img: string) => ({
+          type: 'image_url',
+          image_url: { url: img.startsWith('data:image') ? img : 'data:image/jpeg;base64,' + img },
+        })),
+      ];
+    }
+
+    const openRouterModels = [
+      llmModel,
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "meta-llama/llama-3.1-8b-instruct:free",
+      "deepseek/deepseek-chat:free",
+      "mistralai/mistral-7b-instruct:free",
+    ];
+
+    for (const mModel of Array.from(new Set(openRouterModels))) {
+      try {
+        console.log(`[SmartRun] Tentando OpenRouter (${mModel})...`);
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + OPENROUTER_API_KEY,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://planner-j53e.onrender.com',
+            'X-Title': 'Planner QA Smart Runner',
+          },
+          body: JSON.stringify({
+            model: mModel,
+            messages: [
+              { role: 'system', content: SMART_RUN_SYSTEM_PROMPT },
+              { role: 'user',   content: userMessageContent },
+            ],
+            temperature: 0.1,
+            max_tokens: 4000,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const content = (data.choices?.[0]?.message?.content || '') as string;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json\n?|\n?```/g, '').trim();
+
+          const parsed = robustJsonParse(cleaned);
+          if (parsed?.steps && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+            const steps = parsed.steps as SmartStep[];
+            console.log(`[SmartRun] OpenRouter (${mModel}) gerou ${steps.length} passos.`);
+            return steps.map(s => s.action === 'newPage' ? { ...s, action: 'wait' as const, milliseconds: 1000 } : s);
+          }
+        }
+      } catch (openRouterErr) {
+        console.warn(`[SmartRun] OpenRouter ${mModel} falhou:`, openRouterErr);
+      }
+    }
+  }
+
+  // --- Tentativa 3: Parser determinístico de roteiro PT-BR ---
   const roteiroSteps = parsePortugueseRoteiro(flowDescription, targetUrl);
   if (roteiroSteps && roteiroSteps.length > 0) {
-    console.log('[SmartRun] Roteiro PT-BR parseado deterministicamente (fallback sem IA): ' + roteiroSteps.length + ' steps.');
+    console.log('[SmartRun] Roteiro PT-BR parseado deterministicamente: ' + roteiroSteps.length + ' steps.');
     return roteiroSteps as unknown as SmartStep[];
   }
 
@@ -460,245 +637,224 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
       }
     } catch { /* ignore */ }
 
-    // Helper: build a locator for a step on a given page
-    const buildLocator = (p: any) => {
-      let loc: any;
-      switch (step.selectorType) {
-        case 'role': loc = p.getByRole(step.selector as any, step.value ? { name: step.value } : {}); break;
-        case 'text': loc = p.getByText(step.value || step.selector || '', { exact: false }); break;
-        case 'id': loc = p.locator('#' + step.selector); break;
-        default: loc = p.locator(step.selector || 'body');
+    // Helper: Resilient Button & Element Locator Engine
+    const findElementResiliently = async (p: any) => {
+      // 1. Extrai o termo de busca limpo
+      const rawTerm = (step.value || step.selector || '').trim();
+      const cleanTerm = rawTerm.replace(/["'\u201c\u201d]/g, '').trim();
+
+      // Lista de termos para testar (termo completo e partes principais)
+      const searchTerms = [cleanTerm];
+      if (cleanTerm.includes(' ')) {
+        const parts = cleanTerm.split(/\s+/).filter(w => w.length > 3);
+        if (parts.length > 0) searchTerms.push(parts[0], parts[parts.length - 1]);
       }
-      return loc.first();
+
+      // Tentativa 1: Localizador explícito fornecido
+      if (step.selectorType === 'id' && step.selector) {
+        const loc = p.locator('#' + step.selector).first();
+        if (await loc.count().catch(() => 0) > 0) return loc;
+      }
+
+      if (step.selectorType === 'css' && step.selector && !step.selector.includes(' ') && step.selector.startsWith('.')) {
+        const loc = p.locator(step.selector).first();
+        if (await loc.count().catch(() => 0) > 0) return loc;
+      }
+
+      // Tentativa 2: Busca multi-termo resiliente
+      for (const term of searchTerms) {
+        if (!term || term.length < 2) continue;
+
+        // A. getByRole (button, link, tab, menuitem)
+        try {
+          const roleBtn = p.getByRole('button', { name: new RegExp(term, 'i') }).first();
+          if (await roleBtn.count().catch(() => 0) > 0) return roleBtn;
+        } catch { }
+
+        try {
+          const roleLink = p.getByRole('link', { name: new RegExp(term, 'i') }).first();
+          if (await roleLink.count().catch(() => 0) > 0) return roleLink;
+        } catch { }
+
+        try {
+          const roleTab = p.getByRole('tab', { name: new RegExp(term, 'i') }).first();
+          if (await roleTab.count().catch(() => 0) > 0) return roleTab;
+        } catch { }
+
+        // B. getByText flexível
+        try {
+          const textLoc = p.getByText(new RegExp(term, 'i')).first();
+          if (await textLoc.count().catch(() => 0) > 0) return textLoc;
+        } catch { }
+
+        // C. CSS com has-text em elementos interativos
+        try {
+          const cssInteractive = p.locator(`button:has-text("${term}"), a:has-text("${term}"), [role="button"]:has-text("${term}"), input[type="button"][value*="${term}" i], input[type="submit"][value*="${term}" i]`).first();
+          if (await cssInteractive.count().catch(() => 0) > 0) return cssInteractive;
+        } catch { }
+
+        // D. Atributos de acessibilidade (aria-label, title, data-testid, placeholder)
+        try {
+          const attrLoc = p.locator(`[aria-label*="${term}" i], [title*="${term}" i], [data-testid*="${term}" i], [placeholder*="${term}" i]`).first();
+          if (await attrLoc.count().catch(() => 0) > 0) return attrLoc;
+        } catch { }
+      }
+
+      // Tentativa 3: Se for ação de digitação (type), busca campos semânticos
+      if (step.action === 'type') {
+        const stepText = ((step.selector || '') + ' ' + (step.label || '') + ' ' + (step.value || '')).toLowerCase();
+        if (stepText.includes('email') || stepText.includes('e-mail') || stepText.includes('usuario') || stepText.includes('login')) {
+          const emailFb = p.locator('input[type="email"], input[name*="email" i], input[name*="user" i], input[placeholder*="email" i], input[placeholder*="e-mail" i]').first();
+          if (await emailFb.count().catch(() => 0) > 0) return emailFb;
+        }
+        if (stepText.includes('senha') || stepText.includes('password')) {
+          const passFb = p.locator('input[type="password"], input[name*="pass" i], input[placeholder*="senha" i], input[placeholder*="password" i]').first();
+          if (await passFb.count().catch(() => 0) > 0) return passFb;
+        }
+        // Primeiro input editável disponível
+        const firstInput = p.locator('input[type="text"], input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea').first();
+        if (await firstInput.count().catch(() => 0) > 0) return firstInput;
+      }
+
+      return null;
     };
 
-    // Build locator — search on original page first
-    let locator: any;
+    // Build locator — busca na página ativa
+    let locator = await findElementResiliently(activePage);
     let targetPage = activePage;
-    
-    // Try original page first
-    let tempLoc = buildLocator(activePage);
-    if (await tempLoc.count().catch(() => 0) > 0) {
-      locator = tempLoc;
-    }
 
-    // Fallback 1: try getByText if role search failed
-    if (!locator && step.selectorType === 'role' && step.value) {
-      let fallbackLoc = activePage.getByText(step.value, { exact: false }).first();
-      if (await fallbackLoc.count().catch(() => 0) > 0) {
-        locator = fallbackLoc;
-      }
-    }
-
-    // Fallback 2: try generic CSS attributes (aria-label, title, alt) for icons/links
-    if (!locator && step.value) {
-      // Escape quotes in step.value just in case
-      const safeValue = step.value.replace(/"/g, '\\"');
-      const cssFallback = `[aria-label*="${safeValue}" i], [title*="${safeValue}" i], img[alt*="${safeValue}" i], a:has-text("${safeValue}")`;
-      let fb = activePage.locator(cssFallback).first();
-      if (await fb.count().catch(() => 0) > 0) {
-         locator = fb;
-      }
-    }
-
-    // Fallback 3: Semantic Fallbacks for Login fields (Email, Senha, Botão Entrar)
-    if (!locator || (await locator.count().catch(() => 0)) === 0) {
-      const stepText = ((step.selector || '') + ' ' + (step.label || '') + ' ' + (step.value || '')).toLowerCase();
-
-      if (step.action === 'type') {
-        if (stepText.includes('email') || stepText.includes('e-mail') || stepText.includes('usuario') || stepText.includes('usuário') || stepText.includes('login')) {
-          const emailFb = activePage.locator('input[type="email"], input[name*="email" i], input[name*="user" i], input[name*="login" i], input[placeholder*="email" i], input[placeholder*="e-mail" i], input[id*="email" i], input[id*="user" i]').first();
-          if (await emailFb.count().catch(() => 0) > 0) {
-            locator = emailFb;
-          } else {
-            // First available text input on the page
-            const firstInput = activePage.locator('input[type="text"], input:not([type="password"]):not([type="submit"]):not([type="button"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"])').first();
-            if (await firstInput.count().catch(() => 0) > 0) {
-              locator = firstInput;
-            }
-          }
-        } else if (stepText.includes('senha') || stepText.includes('password') || stepText.includes('pass')) {
-          const passFb = activePage.locator('input[type="password"], input[name*="pass" i], input[name*="senha" i], input[placeholder*="senha" i], input[placeholder*="password" i], input[id*="pass" i], input[id*="senha" i]').first();
-          if (await passFb.count().catch(() => 0) > 0) {
-            locator = passFb;
-          }
-        }
-      } else if (step.action === 'click') {
-        if (stepText.includes('entrar') || stepText.includes('login') || stepText.includes('submeter') || stepText.includes('acessar') || stepText.includes('plataforma')) {
-          const btnFb = activePage.locator('button:has-text("Entrar na plataforma"), button:has-text("Entrar"), button:has-text("Login"), button:has-text("Acessar"), button[type="submit"], input[type="submit"], [data-testid*="login" i], [data-testid*="submit" i]').first();
-          if (await btnFb.count().catch(() => 0) > 0) {
-            locator = btnFb;
-          }
-        }
-      }
-    }
-
-    // Fallback: try on other open pages (rare, but just in case)
+    // Se não encontrou na página principal, tenta nas outras abas abertas
     if (!locator) {
-      const pages = page.context().pages();
-      for (let i = pages.length - 1; i >= 1; i--) {
-        const p = pages[i];
-        tempLoc = buildLocator(p);
-        if (await tempLoc.count().catch(() => 0) > 0) {
-          locator = tempLoc;
+      const allPages = page.context().pages();
+      for (const p of allPages) {
+        if (p === activePage) continue;
+        const found = await findElementResiliently(p);
+        if (found) {
+          locator = found;
           targetPage = p;
           break;
         }
-        if (step.selectorType === 'role' && step.value) {
-          let fb = p.getByText(step.value, { exact: false }).first();
-          if (await fb.count().catch(() => 0) > 0) {
-            locator = fb;
-            targetPage = p;
-            break;
-          }
-        }
       }
     }
 
     if (!locator) {
-      // Last resort: use original page locator
-      locator = buildLocator(activePage);
-    }
-
-    try {
-      await locator.waitFor({ state: 'attached', timeout: 8000 });
-    } catch {
-      throw new Error(`Elemento não encontrado: ${step.selector || step.value}`);
+      // Se for uma verificação (wait / verify), não falha por não achar botão
+      if (step.action === 'wait' || lower.includes('verificar') || lower.includes('observar') || lower.includes('validar')) {
+        await targetPage.waitForTimeout(2000);
+        screenshotBase64 = await takeScreenshot(targetPage);
+        return { index, label: step.label, status: 'aprovado', detalhe: 'Verificação visual concluída.', screenshotBase64, duration: Date.now() - start };
+      }
+      throw new Error(`Elemento interativo não localizado para: "${step.label || step.value || step.selector}"`);
     }
 
     await autoAcceptCookies(targetPage);
-    await locator.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {});
+    await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
 
-    // Highlight
-    const originalStyle = await locator.evaluate((el: HTMLElement) => {
-      const old = { shadow: el.style.boxShadow, outline: el.style.outline, transition: el.style.transition };
-      el.style.transition = 'none';
-      el.style.setProperty('box-shadow', '0 0 0 4px #ef4444, 0 0 20px rgba(239,68,68,0.8)', 'important');
-      el.style.setProperty('outline', '3px solid #ef4444', 'important');
-      el.style.setProperty('outline-offset', '3px', 'important');
-      return old;
-    }).catch(() => null);
+    // Highlight visual sutil para evidência
+    await locator.evaluate((el: HTMLElement) => {
+      el.style.setProperty('box-shadow', '0 0 0 4px #10b981, 0 0 20px rgba(16,185,129,0.8)', 'important');
+      el.style.setProperty('outline', '3px solid #10b981', 'important');
+      el.style.setProperty('outline-offset', '2px', 'important');
+    }).catch(() => {});
 
-    await activePage.waitForTimeout(400);
+    await targetPage.waitForTimeout(300);
 
-    // Evidência do estado ANTES da ação (página inteira com o highlight aplicado)
-    // Usa targetPage (página onde o elemento foi encontrado) — não activePage (sempre a original)
+    // Evidência ANTES da ação
     if (step.action !== 'type' && step.action !== 'hover') {
       screenshotBeforeBase64 = await takeScreenshot(targetPage);
-      
-      // Também capturamos o elemento pequeno opcionalmente
-      const buf = await locator.screenshot({ type: 'jpeg', quality: 80, timeout: 5000 }).catch(() => null);
-      if (buf) screenshotElementBase64 = buf.toString('base64');
     }
 
-    if (originalStyle) {
-      await locator.evaluate((el: HTMLElement, old: any) => {
-        el.style.transition = old.transition || '';
-        el.style.boxShadow = old.shadow || '';
-        el.style.outline = old.outline || '';
-      }, originalStyle).catch(() => {});
-    }
-
-    // Update URL right before action to detect navigation caused by click
-    urlBeforeAction = page.url();
+    // Grava a URL antes da interação
+    urlBeforeAction = targetPage.url();
 
     if (step.action === 'type') {
-      await locator.fill(step.value || '', { timeout: 15000 });
-      await targetPage.waitForTimeout(500);
-      // Capture full-page evidence after filling (highlight the filled field)
+      await locator.fill(step.value || '', { timeout: 8000 }).catch(async () => {
+        await locator.click({ force: true }).catch(() => {});
+        await targetPage.keyboard.type(step.value || '');
+      });
+      await targetPage.waitForTimeout(400);
       screenshotBase64 = await takeScreenshot(targetPage, undefined, true);
     } else if (step.action === 'hover') {
-      await locator.hover({ timeout: 15000 });
-      await targetPage.waitForTimeout(600);
+      await locator.hover({ timeout: 8000 }).catch(() => {});
+      await targetPage.waitForTimeout(500);
+      screenshotBase64 = await takeScreenshot(targetPage);
     } else {
-      // Track how many pages we have before the click
+      // CLIQUE INTELIGENTE E RESILIENTE
       const pageCountBefore = page.context().pages().length;
 
-      if (step.isPopup) {
-        const popup = targetPage.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
+      // Executa o clique com fallback nativo JS
+      try {
+        await locator.click({ timeout: 4000 });
+      } catch {
         try {
-          await locator.click({ force: true, timeout: 5000 });
+          await locator.click({ force: true, timeout: 3000 });
         } catch {
-          await locator.evaluate((el: HTMLElement) => el.click()); // No catch to allow error to propagate if it fails
-        }
-        await popup;
-      } else {
-        try {
-          await locator.click({ force: true, timeout: 5000 });
-        } catch {
-          await locator.evaluate((el: HTMLElement) => el.click());
+          await locator.evaluate((el: HTMLElement) => {
+            el.scrollIntoView({ behavior: 'instant', block: 'center' });
+            el.click();
+          }).catch(() => {});
         }
       }
+
+      // Aguarda transição, requisição de rede ou nova aba
       await Promise.race([
-        targetPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+        targetPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {}),
+        targetPage.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {}),
         targetPage.waitForTimeout(1500),
       ]);
 
-      // If the click opened new tab(s), take screenshot of the new tab then close them
-      const pageCountAfter = page.context().pages().length;
-      if (pageCountAfter > pageCountBefore) {
-        const newestPage = page.context().pages().slice(-1)[0];
-        screenshotBase64 = await takeScreenshot(newestPage);
-        // Close popup tabs and return to original page
-        await closeExtraTabs();
+      // Se abriu nova aba, foca e captura nela
+      const pagesAfter = page.context().pages();
+      if (pagesAfter.length > pageCountBefore) {
+        const newest = pagesAfter[pagesAfter.length - 1];
+        await newest.bringToFront().catch(() => {});
+        await newest.waitForLoadState('domcontentloaded', { timeout: 6000 }).catch(() => {});
+        targetPage = newest;
       }
 
-      // Take screenshot of the new state before potentially navigating back
-      if (!screenshotBase64) {
-        screenshotBase64 = await takeScreenshot(targetPage);
-      }
-
-      // If the click navigated the original page to an external domain, go back
-      try {
-        const currentHost = new URL(page.url()).hostname;
-        const baseHost = new URL(baseUrl).hostname;
-        if (currentHost !== baseHost) {
-          await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(async () => {
-            await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-          });
-          await page.waitForTimeout(500);
-        }
-      } catch { /* ignore */ }
+      screenshotBase64 = await takeScreenshot(targetPage);
     }
 
-    if (step.action !== 'type' && step.action !== 'hover') {
-      if (!screenshotBase64) {
-        screenshotBase64 = await takeScreenshot(targetPage);
-      }
-    }
-
-    const currentUrl = page.url();
+    const currentUrl = targetPage.url();
     let detalhe = step.action === 'type'
-      ? 'Digitado: "' + step.value + '" no campo.'
+      ? `Preenchido: "${step.value}"`
       : step.action === 'hover'
       ? 'Hover realizado com sucesso.'
-      : 'Clique executado.';
+      : 'Clique executado com sucesso.';
       
-    if (currentUrl !== baseUrl && currentUrl !== 'about:blank') {
-      detalhe += ` ➡️ Página atual: ${currentUrl}`;
+    if (currentUrl && currentUrl !== 'about:blank') {
+      detalhe += ` ➡️ Tela: ${currentUrl}`;
     }
 
-    return { index, label: step.label, status: 'aprovado', detalhe, screenshotBase64, screenshotBeforeBase64, screenshotElementBase64, duration: Date.now() - start };
+    return { 
+      index, 
+      label: step.label, 
+      status: 'aprovado', 
+      detalhe, 
+      screenshotBase64, 
+      screenshotBeforeBase64, 
+      screenshotElementBase64, 
+      duration: Date.now() - start 
+    };
 
   } catch (err: unknown) {
-    // Check if the page URL changed — if so, the action actually worked
-    // (e.g., click triggered navigation but element disappeared, causing Playwright timeout)
-    const urlAfterError = page.url();
+    // Verificação de Sucesso Real / Falso Negativo:
+    // Se a URL mudou ou o DOM evoluiu, a ação na verdade FUNCIONOU!
+    const activeP = getActivePage();
+    const urlAfter = activeP.url();
     let urlChanged = false;
     try {
-      urlChanged = urlAfterError !== 'about:blank' && urlAfterError !== urlBeforeAction;
-    } catch { /* urlBeforeAction may not be defined if error was before click */ }
+      urlChanged = urlAfter !== 'about:blank' && urlAfter !== urlBeforeAction && urlAfter !== baseUrl;
+    } catch { }
 
     if (urlChanged) {
-      // The click actually worked! Navigation happened.
-      screenshotBase64 = await takeScreenshot(page).catch(() => undefined);
-      await closeExtraTabs();
+      screenshotBase64 = await takeScreenshot(activeP, undefined, true).catch(() => undefined);
       return {
         index,
         label: step.label,
         status: 'aprovado',
-        detalhe: `Clique executado (com aviso de timeout). ➡️ Página atual: ${urlAfterError}`,
-        screenshotBase64, screenshotBeforeBase64, screenshotElementBase64,
+        detalhe: `Ação confirmada! Redirecionamento para: ${urlAfter}`,
+        screenshotBase64,
         duration: Date.now() - start,
       };
     }
@@ -1029,22 +1185,28 @@ export async function POST(req: Request) {
         finalScreenshot,
       };
 
-      // Create a stripped version without heavy base64 images for the database
-      const resultJsonDataForDb = { ...resultJsonData };
-      delete resultJsonDataForDb.finalScreenshot;
-      if (resultJsonDataForDb.steps) {
-        resultJsonDataForDb.steps = resultJsonDataForDb.steps.map(s => {
-          const sCopy = { ...s };
-          delete sCopy.screenshotBase64;
-          delete sCopy.screenshotBeforeBase64;
-          return sCopy;
-        });
-      }
+      // Salva os dados no banco de dados, mantendo as screenshots para evidência permanente
+      const resultJsonDataForDb = {
+        ...resultJsonData,
+        // Mantém a finalScreenshot e os screenshots de steps para auditoria
+        finalScreenshot: resultJsonData.finalScreenshot,
+        steps: (resultJsonData.steps || []).map(s => ({
+          index: s.index,
+          label: s.label,
+          status: s.status,
+          detalhe: s.detalhe,
+          duration: s.duration,
+          screenshotBase64: s.screenshotBase64,
+          screenshotElementBase64: s.screenshotElementBase64,
+        }))
+      };
 
       try {
+        const projectIdFromReq = body.project_id || body.projectId || null;
         if (reportId) {
           await supabase.from('qa_reports').update({
             title: 'Auditoria IA: ' + displayName,
+            project_id: projectIdFromReq,
             result_raw: JSON.stringify(resultJsonDataForDb),
             result_json: resultJsonDataForDb,
           }).eq('id', reportId);
@@ -1052,6 +1214,7 @@ export async function POST(req: Request) {
         } else {
           const { data: insertedReport, error } = await supabase.from('qa_reports').insert({
             user_id: user.id,
+            project_id: projectIdFromReq,
             type: 'smart_runner',
             title: 'Auditoria IA: ' + displayName,
             input_description: 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription,

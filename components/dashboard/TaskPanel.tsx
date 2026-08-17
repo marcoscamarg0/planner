@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2, Play, Code2 } from "lucide-react";
+import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2, Play, Code2, FileDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn, getPriorityColor, getPriorityLabel, getStatusLabel, formatDate } from "@/lib/utils";
@@ -48,6 +48,21 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
   const [bulkPriority, setBulkPriority] = useState<TaskPriority | "">("");
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, title: "", action: "Executando" });
+  const [generatingTasksPdf, setGeneratingTasksPdf] = useState(false);
+  const [isGeneratingPlans, setIsGeneratingPlans] = useState(false);
+  const [planProgress, setPlanProgress] = useState("");
+  const [manualTaskModal, setManualTaskModal] = useState<{
+    task: Task;
+    errorMsg?: string;
+    targetUrl?: string;
+  } | null>(null);
+  const [manualEvidence, setManualEvidence] = useState<string | null>(null);
+
+  // Helper para extrair número do TC para ordenação estrita (TC001 -> 1, TC002 -> 2)
+  const extractTcNumber = (title: string): number => {
+    const match = title.match(/(?:TC|CT|TESTE)[\s_-]?(\d+)/i);
+    return match ? parseInt(match[1], 10) : 999999;
+  };
 
   const generateBulkAutomation = async () => {
     const ids = Array.from(selectedTasks);
@@ -99,6 +114,1070 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     setSelectedTasks(new Set());
   };
 
+  const generateBulkTestPlans = async (targetTasksList?: Task[]) => {
+    const list = targetTasksList || (selectedTasks.size > 0 ? tasks.filter(t => selectedTasks.has(t.id)) : tasks);
+    if (list.length === 0) {
+      alert("Nenhum caso de teste disponível para gerar o plano.");
+      return;
+    }
+
+    setIsGeneratingPlans(true);
+    const supabase = createClient();
+    let currentTasks = [...tasks];
+    let count = 0;
+
+    for (const task of list) {
+      count++;
+      setPlanProgress(`Gerando plano de teste ${count}/${list.length}: ${task.title.slice(0, 30)}...`);
+
+      try {
+        const res = await fetch("/api/ai/task-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            taskTitle: task.title,
+            projectTitle: projectUrl || "Sistema Web",
+            projectUrl: projectUrl || "",
+            currentDescription: task.description || "",
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.plan) {
+            currentTasks = currentTasks.map(t => t.id === task.id ? { ...t, description: data.plan } : t);
+            onTasksChange(currentTasks);
+            await supabase.from("tasks").update({ description: data.plan, updated_at: new Date().toISOString() }).eq("id", task.id);
+          }
+        }
+      } catch (err) {
+        console.warn("Falha ao gerar plano para tarefa:", task.title, err);
+      }
+    }
+
+    setIsGeneratingPlans(false);
+    setPlanProgress("");
+    setSelectedTasks(new Set());
+  };
+
+  const downloadTasksPdf = async () => {
+    const ids = Array.from(selectedTasks);
+    if (ids.length === 0) return;
+    const rawTasks = ids.map(id => tasks.find(t => t.id === id)).filter(Boolean) as Task[];
+    if (rawTasks.length === 0) return;
+
+    // Ordenação estritamente crescente: TC001, TC002, TC003, ...
+    const tasksToExport = [...rawTasks].sort((a, b) => {
+      const numA = extractTcNumber(a.title);
+      const numB = extractTcNumber(b.title);
+      if (numA !== numB) return numA - numB;
+      return a.title.localeCompare(b.title, undefined, { numeric: true });
+    });
+
+    setGeneratingTasksPdf(true);
+    try {
+      const statusLabel: Record<string, string> = { todo: 'A Fazer', in_progress: 'Em Progresso', done: 'Concluída', cancelled: 'Cancelada' };
+      const priorityLabel: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
+
+      // Tenta buscar relatórios recentes do projeto e do usuário no banco para vincular evidências e capturas automaticamente
+      let projectReports: any[] = [];
+      try {
+        const supabase = createClient();
+        const { data: repData } = await supabase
+          .from('qa_reports')
+          .select('id, title, project_id, type, result_json, result_raw, created_at')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (repData) projectReports = repData;
+      } catch (err) {
+        console.warn('Falha ao buscar relatórios vinculados:', err);
+      }
+
+      const tasksContent = tasksToExport
+        .map((t, i) => [
+          `## ${i + 1}. ${t.title}`,
+          `**Status:** ${statusLabel[t.status] || t.status} | **Prioridade:** ${priorityLabel[t.priority] || t.priority}`,
+          t.description ? `\n**Descrição / Plano:**\n${t.description}` : '',
+        ].filter(Boolean).join('\n'))
+        .join('\n\n---\n\n');
+
+      let content = '';
+      try {
+        const res = await fetch('/api/ai/qa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tool_type: 'consolidated_report',
+            input: [
+              `Você receberá ${tasksToExport.length} tarefa(s) de um projeto. Gere um Relatório Executivo Consolidado de Testes em português contendo:`,
+              `1. **Sumário Executivo** — visão geral das tarefas, status geral e cobertura`,
+              `2. **Tabela de Tarefas** — lista com número, título, status, prioridade e observações`,
+              `3. **Detalhamento por Tarefa** — para cada tarefa: objetivo, passos do plano e resultado esperado`,
+              `4. **Métricas** — distribuição por status e prioridade`,
+              `5. **Recomendações e Próximos Passos** — o que precisa ser corrigido e priorizações`,
+              ``,
+              `Use formatação rica em Markdown com títulos (#, ##, ###), tabelas, listas e negrito. Seja detalhado e profissional.`,
+              ``,
+              `--- TAREFAS SELECIONADAS ---`,
+              ``,
+              tasksContent,
+            ].join('\n'),
+            model: 'auto-free',
+            project_id: projectId,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          content = data.result || data.report?.result_raw || '';
+        }
+      } catch (aiErr) {
+        console.warn('Erro ao chamar IA, usando fallback estruturado:', aiErr);
+      }
+
+      // Fallback estruturado caso a IA falhe ou demore
+      if (!content) {
+        const total = tasksToExport.length;
+        const done = tasksToExport.filter(t => t.status === 'done').length;
+        const inProgress = tasksToExport.filter(t => t.status === 'in_progress').length;
+        const todo = tasksToExport.filter(t => t.status === 'todo').length;
+
+        content = [
+          `# Sumário Executivo`,
+          `Relatório consolidado de **${total}** tarefas selecionadas do projeto. Foram identificadas **${done}** tarefas concluídas, **${inProgress}** em progresso e **${todo}** a fazer.`,
+          ``,
+          `## Tabela de Tarefas`,
+          `| # | Tarefa | Status | Prioridade |`,
+          `|---|---|---|---|`,
+          ...tasksToExport.map((t, idx) => `| ${idx + 1} | ${t.title} | ${statusLabel[t.status] || t.status} | ${priorityLabel[t.priority] || t.priority} |`),
+          ``,
+          `## Detalhamento das Tarefas`,
+          ...tasksToExport.map((t, idx) => [
+            `### ${idx + 1}. ${t.title}`,
+            `- **Status:** ${statusLabel[t.status] || t.status}`,
+            `- **Prioridade:** ${priorityLabel[t.priority] || t.priority}`,
+            t.description ? `\n**Plano / Descrição:**\n${t.description}` : '\n*Sem descrição detalhada cadastrada.*',
+            ``,
+          ].join('\n')),
+          `## Métricas Gerais`,
+          `- **Taxa de Conclusão:** ${total > 0 ? Math.round((done / total) * 100) : 0}%`,
+          `- **Tarefas Críticas/Alta Prioridade:** ${tasksToExport.filter(t => t.priority === 'high' || t.priority === 'urgent').length}`,
+        ].join('\n');
+      }
+
+      const now = new Date().toLocaleString('pt-BR');
+      
+      // Helper para garantir que qualquer string Base64 ou URL tenha o prefixo correto de imagem
+      const toDataUri = (img: string | undefined | null): string => {
+        if (!img) return '';
+        const trimmed = String(img).trim();
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/')) {
+          return trimmed;
+        }
+        if (trimmed.startsWith('iVBOR')) {
+          return `data:image/png;base64,${trimmed}`;
+        }
+        return `data:image/jpeg;base64,${trimmed}`;
+      };
+
+      // Helper para extrair código único do caso de teste (ex: "TC001", "TC006")
+      const extractTcCode = (str: string): string | null => {
+        if (!str) return null;
+        const match = str.match(/(?:TC|CT|TESTE)[\s_-]?(\d+)/i);
+        return match ? `TC${match[1].padStart(3, '0')}` : null;
+      };
+
+      // Helper para extrair passos textuais da descrição da própria tarefa
+      const extractStepsFromDescription = (desc: string) => {
+        if (!desc) return [];
+        const lines = desc.split('\n');
+        const steps: Array<{ index: number; label: string; detalhe?: string }> = [];
+        let isInsideSteps = false;
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (/passos|steps|procedimento/i.test(trimmed)) {
+            isInsideSteps = true;
+            continue;
+          }
+          if (isInsideSteps && /^#{1,4}\s+|^\*\*(?:resultado|crit[ée]rio|pre-condi)/i.test(trimmed)) {
+            isInsideSteps = false;
+          }
+
+          const stepMatch = trimmed.match(/^(\d+)[\.\)]\s+(.+)$/);
+          if (stepMatch && (isInsideSteps || steps.length > 0)) {
+            steps.push({
+              index: steps.length + 1,
+              label: stepMatch[2].replace(/\*\*/g, '').trim(),
+            });
+          }
+        }
+        return steps;
+      };
+
+      // Helper para gerar assinatura de imagem e evitar prints duplicados
+      const getImageFingerprint = (img: string | undefined | null): string => {
+        if (!img) return '';
+        const trimmed = String(img).trim();
+        return `${trimmed.length}_${trimmed.slice(60, 140)}_${trimmed.slice(-60)}`;
+      };
+
+      // Constrói os cards detalhados de cada tarefa selecionada com todas as suas evidências
+      const tasksCardsHtml = tasksToExport.map((t, idx) => {
+        const meta = (t.metadata || {}) as Record<string, any>;
+        const taskTcCode = extractTcCode(t.title);
+        const seenFingerprints = new Set<string>();
+        
+        // 1. Evidência direta na tarefa
+        let rawEvidence = meta.evidence as string | undefined;
+        const lastRun = meta.lastRunResult as Record<string, any> | undefined;
+        const autoCode = meta.automationCode as string | undefined;
+
+        // 2. Extrai imagens embutidas em markdown na descrição
+        if (!rawEvidence && t.description) {
+          const mdImgMatch = t.description.match(/!\[.*?\]\((https?:\/\/[^\s\)]+|data:image\/[^\s\)]+)\)/);
+          if (mdImgMatch) rawEvidence = mdImgMatch[1];
+        }
+
+        // 3. Matching rigoroso com relatórios do projeto: apenas se o TC coincidir ou o título for idêntico
+        let matchedReportSteps = (lastRun?.steps || []) as any[];
+        let rawFinalScreenshot = lastRun?.finalScreenshot;
+
+        if (matchedReportSteps.length === 0 && projectReports.length > 0) {
+          const matchedRep = projectReports.find(r => {
+            const repTitle = r.title || '';
+            const repJobName = r.result_json?.jobName || '';
+            const repTcCode = extractTcCode(repTitle) || extractTcCode(repJobName);
+
+            // Match 1: Código TC idêntico (ex: TC006 === TC006)
+            if (taskTcCode && repTcCode && taskTcCode === repTcCode) return true;
+
+            // Match 2: Título exato limpo
+            const cleanTaskTitle = t.title.replace(/^\[QA\]\s*/i, '').toLowerCase().trim();
+            const cleanRepTitle = repTitle.replace(/^(?:Auditoria IA:\s*|\[QA\]\s*)/i, '').toLowerCase().trim();
+            return cleanTaskTitle.length > 5 && cleanRepTitle.includes(cleanTaskTitle);
+          });
+
+          if (matchedRep?.result_json) {
+            matchedReportSteps = matchedRep.result_json.steps || [];
+            rawFinalScreenshot = matchedRep.result_json.finalScreenshot;
+            if (!rawEvidence && rawFinalScreenshot) {
+              rawEvidence = rawFinalScreenshot;
+            }
+          }
+        }
+
+        // 4. Se não há execução de runner Playwright gravada, extrai os passos da própria descrição da tarefa
+        const parsedDescSteps = matchedReportSteps.length === 0 ? extractStepsFromDescription(t.description || '') : [];
+
+        const evidenceImg = toDataUri(rawEvidence);
+        if (evidenceImg) {
+          seenFingerprints.add(getImageFingerprint(evidenceImg));
+        }
+
+        const finalScreenshotImg = toDataUri(rawFinalScreenshot);
+
+        const statusMap: Record<string, { label: string; color: string; bg: string; border: string }> = {
+          done: { label: 'Concluído / Aprovado', color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)', border: 'rgba(16, 185, 129, 0.25)' },
+          in_progress: { label: 'Em Progresso', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)', border: 'rgba(245, 158, 11, 0.25)' },
+          todo: { label: 'A Fazer / Pendente', color: '#6366f1', bg: 'rgba(99, 102, 241, 0.1)', border: 'rgba(99, 102, 241, 0.25)' },
+          cancelled: { label: 'Cancelado', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)', border: 'rgba(239, 68, 68, 0.25)' },
+        };
+        const sInfo = statusMap[t.status] || statusMap.todo;
+
+        const priorityMap: Record<string, { label: string; color: string }> = {
+          urgent: { label: 'URGENTE', color: '#f43f5e' },
+          high: { label: 'ALTA', color: '#fb7185' },
+          medium: { label: 'MÉDIA', color: '#fbbf24' },
+          low: { label: 'BAIXA', color: '#34d399' },
+        };
+        const pInfo = priorityMap[t.priority] || priorityMap.medium;
+
+        const displayTcCode = taskTcCode || `TC-${String(idx + 1).padStart(3, '0')}`;
+
+        return `
+        <div class="test-card" data-status="${t.status}" id="task-${idx + 1}">
+          <div class="test-header">
+            <div class="test-title-wrapper">
+              <span class="test-index">${displayTcCode}</span>
+              <h2 class="test-title" contenteditable="true">${t.title}</h2>
+            </div>
+            <div class="test-badges">
+              <span class="badge" style="color:${pInfo.color}; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15);">
+                PRIORIDADE: ${pInfo.label}
+              </span>
+              <span class="badge" style="color:${sInfo.color}; background:${sInfo.bg}; border:1px solid ${sInfo.border};">
+                ${sInfo.label}
+              </span>
+            </div>
+          </div>
+
+          <div class="test-body">
+            <!-- Descrição e Plano de Teste -->
+            <div class="section-block">
+              <h3 class="section-title">📋 Especificação e Plano de Teste</h3>
+              <div class="description-box" contenteditable="true">
+                ${t.description 
+                  ? t.description
+                      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                      .replace(/\n\n/g, '</p><p>')
+                      .replace(/\n/g, '<br/>')
+                  : '<em style="color:#64748b;">Nenhum detalhamento textual informado.</em>'
+                }
+              </div>
+            </div>
+
+            <!-- Evidência Anexada ou Captura do Teste -->
+            <div class="section-block evidence-section">
+              <div class="section-header-flex" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h3 class="section-title">📸 Registro de Evidência & Prova de Execução</h3>
+                <button class="img-edit-btn add-btn" onclick="window.triggerImageUpload(this.closest('.evidence-section'))" title="Anexar ou trocar imagem">
+                  📷 Trocar / Anexar Imagem
+                </button>
+              </div>
+              ${evidenceImg ? `
+                <div class="evidence-preview-wrapper" onclick="window.openLightboxFromEl(this)">
+                  <img src="${evidenceImg}" alt="Evidência" class="evidence-img" />
+                  <div class="img-overlay">
+                    <span>🔍 Clique para zoom &bull; Pressione Ctrl+V ou use os botões para trocar</span>
+                  </div>
+                  <div class="img-action-bar" onclick="event.stopPropagation()">
+                    <button class="img-action-pill" onclick="window.triggerImageUpload(this.closest('.evidence-section'))" title="Trocar imagem">📷 Trocar</button>
+                    <button class="img-action-pill danger" onclick="window.removeCardImage(this)" title="Remover imagem">🗑️ Remover</button>
+                  </div>
+                </div>
+              ` : `
+                <div class="evidence-audit-badge" onclick="window.triggerImageUpload(this.closest('.evidence-section'))" title="Clique ou pressione Ctrl+V para anexar um print">
+                  <div class="audit-icon">🛡️</div>
+                  <div class="audit-details">
+                    <p class="audit-title">Evidência Registrada no Sistema de QA</p>
+                    <p class="audit-desc">Status da Tarefa: <strong>${sInfo.label}</strong> &bull; Prioridade: <strong>${pInfo.label}</strong></p>
+                    <p class="audit-date">Registro validado em: ${now} &bull; <span style="color:#818cf8; text-decoration:underline;">Clique para anexar print</span></p>
+                  </div>
+                  <span class="audit-tag">CONFORME QA</span>
+                </div>
+              `}
+            </div>
+
+            <!-- Passos da Execução de Automação Playwright (com deduplicação inteligente de telas) -->
+            ${matchedReportSteps.length > 0 ? `
+              <div class="section-block">
+                <h3 class="section-title">⚡ Evidências da Execução Automatizada (${matchedReportSteps.length} Passos)</h3>
+                <div class="steps-grid">
+                  ${matchedReportSteps.map((step: any, sIdx: number) => {
+                    const isOk = step.status === 'aprovado';
+                    const rawStepImg = toDataUri(step.screenshotBase64 || step.screenshotElementBase64);
+                    const fp = getImageFingerprint(rawStepImg);
+                    
+                    // Se a imagem for idêntica a uma já exibida, não duplica no passo
+                    const isDuplicate = !fp || seenFingerprints.has(fp);
+                    if (fp && !isDuplicate) {
+                      seenFingerprints.add(fp);
+                    }
+                    const stepImg = isDuplicate ? '' : rawStepImg;
+
+                    return `
+                      <div class="step-item ${isOk ? 'step-ok' : 'step-fail'}" tabindex="0" onpaste="window.handleStepPaste(event, this)">
+                        <div class="step-header">
+                          <span class="step-badge">${sIdx + 1}</span>
+                          <span class="step-label" contenteditable="true">${step.label}</span>
+                          <span class="step-status ${isOk ? 'status-ok' : 'status-fail'}" contenteditable="true">
+                            ${isOk ? '✓ APROVADO' : '✖ FALHOU'}
+                          </span>
+                        </div>
+                        ${step.detalhe ? `<p class="step-detail" contenteditable="true">${step.detalhe}</p>` : ''}
+                        <div class="step-img-container">
+                          ${stepImg ? `
+                            <div class="step-img-box" onclick="window.openLightboxFromEl(this)">
+                              <img src="${stepImg}" alt="Screenshot do Passo" />
+                              <span class="zoom-tag">🔍 Zoom</span>
+                              <div class="step-img-actions" onclick="event.stopPropagation()">
+                                <button onclick="window.triggerStepImageUpload(this)" title="Trocar imagem">📷</button>
+                                <button class="danger" onclick="window.removeStepImage(this)" title="Remover imagem">🗑️</button>
+                              </div>
+                            </div>
+                          ` : `
+                            <div class="step-img-empty" onclick="window.triggerStepImageUpload(this)">
+                              <span>➕ Anexar print (ou Ctrl+V)</span>
+                            </div>
+                          `}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            ` : parsedDescSteps.length > 0 ? `
+              <!-- Passos Extraídos do Roteiro Cadastrado para Esta Tarefa -->
+              <div class="section-block">
+                <h3 class="section-title">📝 Roteiro de Passos do Teste (${parsedDescSteps.length} Passos)</h3>
+                <div class="steps-grid">
+                  ${parsedDescSteps.map((step, sIdx) => `
+                    <div class="step-item step-ok" tabindex="0" onpaste="window.handleStepPaste(event, this)">
+                      <div class="step-header">
+                        <span class="step-badge">${sIdx + 1}</span>
+                        <span class="step-label" contenteditable="true">${step.label}</span>
+                        <span class="step-status status-ok" contenteditable="true">ESPECIFICADO</span>
+                      </div>
+                      <div class="step-img-container">
+                        <div class="step-img-empty" onclick="window.triggerStepImageUpload(this)">
+                          <span>➕ Anexar print (ou Ctrl+V)</span>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Screenshot Final do Navegador (Apenas se for visualmente diferente das já exibidas) -->
+            ${finalScreenshotImg && !seenFingerprints.has(getImageFingerprint(finalScreenshotImg)) ? `
+              <div class="section-block">
+                <h3 class="section-title">🏁 Captura Final do Navegador</h3>
+                <div class="evidence-preview-wrapper" onclick="window.openLightboxFromEl(this)">
+                  <img src="${finalScreenshotImg}" alt="Captura Final" class="evidence-img" />
+                  <div class="img-overlay"><span>🔍 Clique para expandir</span></div>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Código de Automação Playwright -->
+            ${autoCode ? `
+              <div class="section-block">
+                <h3 class="section-title">💻 Script Playwright Gerado</h3>
+                <pre class="code-box"><code>${autoCode.replace(/```(?:javascript|typescript)?\n?/g, '').trim()}</code></pre>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+        `;
+       }).join('\n');
+
+      const totalCount = tasksToExport.length;
+      const doneCount = tasksToExport.filter(t => t.status === 'done').length;
+      const inProgressCount = tasksToExport.filter(t => t.status === 'in_progress').length;
+      const todoCount = tasksToExport.filter(t => t.status === 'todo').length;
+      const successRate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+
+      const htmlContent = `<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relatório Executivo de QA & Testes — ${now}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+    
+    :root {
+      --bg: #090d16;
+      --card-bg: #111726;
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --primary-light: #818cf8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --code-bg: #060911;
+    }
+
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --card-border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #475569;
+      --code-bg: #f1f5f9;
+    }
+    [data-theme="light"] .top-toolbar { background: rgba(255, 255, 255, 0.92); }
+    [data-theme="light"] .brand-tag { color: #0f172a; }
+    [data-theme="light"] .btn { background: #f8fafc; color: #0f172a; border-color: #cbd5e1; }
+    [data-theme="light"] .btn:hover { background: #e2e8f0; }
+    [data-theme="light"] .description-box { background: #f8fafc; border-color: #e2e8f0; color: #334155; }
+    [data-theme="light"] .step-item { background: #ffffff; border-color: #e2e8f0; }
+    [data-theme="light"] .evidence-audit-badge { background: #f1f5f9; border-color: #cbd5e1; }
+    [data-theme="light"] .search-input { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
+    [data-theme="light"] .pill-btn { background: #ffffff; color: #475569; border-color: #cbd5e1; }
+    [data-theme="light"] .pill-btn.active { background: #6366f1; color: #ffffff; border-color: #6366f1; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Outfit', -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; transition: background 0.3s, color 0.3s; padding-bottom: 100px; }
+
+    /* Sticky Interactive Control Bar */
+    .top-toolbar { position: sticky; top: 0; z-index: 1000; background: rgba(9, 13, 22, 0.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--card-border); padding: 12px 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .toolbar-left { display: flex; align-items: center; gap: 12px; }
+    .brand-tag { font-weight: 800; font-size: 14px; color: #fff; display: flex; align-items: center; gap: 8px; letter-spacing: -0.5px; }
+    .brand-tag span { background: linear-gradient(135deg, #6366f1, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .btn { appearance: none; border: 1px solid var(--card-border); background: rgba(255,255,255,0.05); color: var(--text); padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; font-family: inherit; }
+    .btn:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px); }
+    .btn-primary { background: linear-gradient(135deg, #6366f1, #4f46e5); border: none; color: #fff; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+    .btn-success { background: linear-gradient(135deg, #10b981, #059669); border: none; color: #fff; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3); }
+    
+    /* Layout Container */
+    .report-wrapper { max-width: 1050px; margin: 32px auto; padding: 0 20px; }
+
+    /* Executive Hero Cover */
+    .executive-cover { background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 48px; position: relative; overflow: hidden; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); margin-bottom: 32px; }
+    .executive-cover::after { content: ''; position: absolute; top: -50%; right: -20%; width: 400px; height: 400px; background: radial-gradient(circle, rgba(99, 102, 241, 0.3), transparent 70%); border-radius: 50%; pointer-events: none; }
+    .cover-chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(99, 102, 241, 0.25); border: 1px solid rgba(99, 102, 241, 0.4); padding: 6px 16px; border-radius: 100px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #c7d2fe; margin-bottom: 20px; }
+    .cover-heading { font-size: 36px; font-weight: 900; line-height: 1.2; margin-bottom: 12px; color: #fff; }
+    .cover-subheading { font-size: 15px; color: #cbd5e1; max-width: 700px; }
+    
+    /* KPI Stats Row */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-top: 36px; }
+    .kpi-card { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; text-align: left; }
+    .kpi-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .kpi-value { font-size: 28px; font-weight: 900; color: #fff; }
+    .kpi-sub { font-size: 11px; color: #cbd5e1; margin-top: 4px; }
+    
+    /* Progress Bar */
+    .progress-track { width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 100px; margin-top: 10px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #10b981, #34d399); border-radius: 100px; transition: width 0.5s ease; }
+
+    /* Executive AI Summary Box */
+    .ai-summary-card { background: var(--card-bg); border: 1px solid var(--card-border); border-left: 5px solid var(--primary); border-radius: 20px; padding: 32px; margin-bottom: 32px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+    .ai-summary-card h2 { font-size: 20px; font-weight: 800; margin-bottom: 16px; color: var(--primary-light); display: flex; align-items: center; gap: 8px; }
+    .ai-content { font-size: 14px; color: var(--text-muted); line-height: 1.8; }
+    .ai-content strong { color: var(--text); }
+    .ai-content ul, .ai-content ol { margin: 12px 0 16px 24px; }
+    .ai-content li { margin-bottom: 6px; }
+    .ai-content table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+    .ai-content th { background: rgba(99, 102, 241, 0.15); padding: 10px 14px; text-align: left; font-weight: 700; color: var(--text); border-bottom: 1px solid var(--card-border); }
+    .ai-content td { padding: 10px 14px; border-bottom: 1px solid var(--card-border); color: var(--text-muted); }
+
+    /* Filter & Search Bar */
+    .filter-section { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 32px 0 20px; flex-wrap: wrap; }
+    .filter-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill-btn { padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 700; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
+    .pill-btn.active, .pill-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .search-input { background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text); padding: 8px 16px; border-radius: 100px; font-size: 12px; outline: none; width: 240px; }
+
+    /* Test Case Detailed Card */
+    .test-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 20px; margin-bottom: 28px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.15); page-break-inside: avoid; }
+    .test-header { padding: 24px 32px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .test-title-wrapper { display: flex; align-items: center; gap: 14px; }
+    .test-index { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 800; background: rgba(99, 102, 241, 0.15); color: var(--primary-light); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.3); }
+    .test-title { font-size: 18px; font-weight: 800; color: var(--text); outline: none; }
+    .test-badges { display: flex; align-items: center; gap: 8px; }
+    .badge { font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 100px; letter-spacing: 0.5px; text-transform: uppercase; }
+    
+    /* Visual Cues for Editable Content */
+    [contenteditable="true"] { outline: none; transition: background 0.2s, box-shadow 0.2s; border-radius: 6px; padding: 2px 4px; }
+    [contenteditable="true"]:hover { background: rgba(99, 102, 241, 0.08); cursor: text; }
+    [contenteditable="true"]:focus { background: rgba(99, 102, 241, 0.15); box-shadow: 0 0 0 2px var(--primary); }
+
+    .test-body { padding: 32px; display: flex; flex-direction: column; gap: 24px; }
+    .section-block { display: flex; flex-direction: column; gap: 10px; }
+    .section-title { font-size: 13px; font-weight: 700; color: var(--primary-light); text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 6px; }
+    
+    .description-box { background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 14px; padding: 18px 22px; font-size: 14px; color: var(--text-muted); line-height: 1.7; outline: none; }
+    .description-box strong { color: var(--text); }
+
+    /* Evidence Audit Badge */
+    .evidence-audit-badge { background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 14px; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .audit-icon { font-size: 28px; }
+    .audit-details { flex: 1; min-width: 200px; }
+    .audit-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+    .audit-desc { font-size: 12px; color: var(--text-muted); }
+    .audit-desc strong { color: var(--text); }
+    .audit-date { font-size: 11px; color: var(--primary-light); font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
+    .audit-tag { font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 100px; background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); letter-spacing: 1px; }
+
+    /* Evidence Image Previews */
+    .evidence-preview-wrapper { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--card-border); background: #000; cursor: pointer; max-width: 100%; max-height: 420px; display: flex; justify-content: center; align-items: center; }
+    .evidence-img { max-width: 100%; max-height: 420px; object-fit: contain; display: block; transition: transform 0.3s; }
+    .evidence-preview-wrapper:hover .evidence-img { transform: scale(1.02); }
+    .img-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; display: flex; align-items: center; justify-content: center; transition: opacity 0.2s; color: #fff; font-weight: 700; font-size: 13px; }
+    .evidence-preview-wrapper:hover .img-overlay { opacity: 1; }
+
+    /* Step-by-Step Grid */
+    .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 8px; }
+    .step-item { background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .step-item.step-ok { border-left: 4px solid var(--success); }
+    .step-item.step-fail { border-left: 4px solid var(--danger); }
+    .step-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+    .step-badge { width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; }
+    .step-label { font-weight: 700; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .step-status { font-weight: 800; font-size: 10px; padding: 2px 8px; border-radius: 100px; }
+    .status-ok { color: var(--success); background: rgba(16, 185, 129, 0.15); }
+    .status-fail { color: var(--danger); background: rgba(239, 68, 68, 0.15); }
+    .step-detail { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+    .step-img-box { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--card-border); height: 140px; cursor: pointer; }
+    .step-img-box img { width: 100%; height: 100%; object-fit: cover; }
+    .zoom-tag { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+
+    /* Image Edit Bars and Actions */
+    .img-edit-btn { background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary-light); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+    .img-edit-btn:hover { background: var(--primary); color: #fff; }
+    .img-action-bar { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; z-index: 10; opacity: 0; transition: opacity 0.2s; }
+    .evidence-preview-wrapper:hover .img-action-bar { opacity: 1; }
+    .img-action-pill { background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.25); color: #fff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s; backdrop-filter: blur(8px); }
+    .img-action-pill:hover { background: #6366f1; border-color: #818cf8; }
+    .img-action-pill.danger:hover { background: #ef4444; border-color: #f87171; }
+    
+    .step-img-container { margin-top: 8px; }
+    .step-img-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 10; opacity: 0; transition: opacity 0.2s; }
+    .step-img-box:hover .step-img-actions { opacity: 1; }
+    .step-img-actions button { background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.3); color: #fff; width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; }
+    .step-img-actions button:hover { background: #6366f1; }
+    .step-img-actions button.danger:hover { background: #ef4444; }
+    
+    .step-img-empty { border: 1px dashed var(--card-border); border-radius: 8px; padding: 12px; text-align: center; color: var(--text-muted); font-size: 11px; cursor: pointer; background: rgba(255,255,255,0.01); transition: all 0.2s; }
+    .step-img-empty:hover { border-color: var(--primary); color: var(--primary-light); background: rgba(99, 102, 241, 0.05); }
+
+    /* Code Box */
+    .code-box { background: var(--code-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #a5b4fc; line-height: 1.6; }
+
+    /* Lightbox Modal */
+    .lightbox-modal { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,0.92); backdrop-filter: blur(12px); display: none; align-items: center; justify-content: center; padding: 40px; flex-direction: column; pointer-events: none; }
+    .lightbox-modal.active { display: flex !important; pointer-events: auto !important; }
+    .lightbox-img { max-width: 95%; max-height: 85vh; object-fit: contain; border-radius: 12px; box-shadow: 0 25px 60px rgba(0,0,0,0.8); }
+    .lightbox-caption { color: #fff; font-size: 14px; font-weight: 700; margin-top: 16px; }
+    .lightbox-close { position: absolute; top: 24px; right: 24px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; font-size: 20px; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+    /* Print Formatting */
+    @media print {
+      body { background: #fff !important; color: #0f172a !important; font-size: 13px !important; }
+      .top-toolbar, .filter-section, .lightbox-modal { display: none !important; }
+      .report-wrapper { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
+      
+      .executive-cover { background: #1e1b4b !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; page-break-after: always; margin-bottom: 30px; border-radius: 0; padding: 36px; }
+      .cover-heading { color: #fff !important; font-size: 28px !important; }
+      .cover-subheading { color: #cbd5e1 !important; }
+      .kpi-card { background: rgba(255,255,255,0.12) !important; border: 1px solid #4338ca !important; }
+      .kpi-value { color: #fff !important; }
+      
+      .ai-summary-card { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; border-left: 5px solid #6366f1 !important; color: #1e293b !important; page-break-inside: avoid; margin-bottom: 24px; }
+      .ai-content { color: #334155 !important; }
+      .ai-content th { background: #e2e8f0 !important; color: #0f172a !important; border-color: #cbd5e1 !important; }
+      .ai-content td { border-color: #e2e8f0 !important; color: #334155 !important; }
+      
+      .test-card { box-shadow: none !important; border: 1px solid #cbd5e1 !important; margin-bottom: 24px !important; background: #ffffff !important; page-break-inside: avoid; border-radius: 12px; }
+      .test-header { background: #f8fafc !important; border-bottom: 1px solid #cbd5e1 !important; padding: 16px 20px !important; }
+      .test-title { color: #0f172a !important; font-size: 16px !important; }
+      .section-title { color: #4338ca !important; font-size: 12px !important; }
+      .description-box { background: #f8fafc !important; color: #334155 !important; border: 1px solid #cbd5e1 !important; padding: 14px !important; }
+      .code-box { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #cbd5e1 !important; page-break-inside: avoid; }
+      
+      .step-item { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; page-break-inside: avoid; }
+      .step-label { color: #0f172a !important; }
+      .step-detail { color: #475569 !important; }
+      
+      .evidence-preview-wrapper { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; max-height: 350px !important; page-break-inside: avoid; }
+      .evidence-img { max-height: 350px !important; }
+      .img-overlay { display: none !important; }
+      .evidence-audit-badge { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; color: #0f172a !important; }
+      .audit-title { color: #0f172a !important; }
+      .audit-desc { color: #475569 !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Interactive Controls Bar -->
+  <div class="top-toolbar">
+    <div class="toolbar-left">
+      <div class="brand-tag">⚡ <span>Planner QA Studio</span> &bull; Relatório Profissional</div>
+    </div>
+    <div class="toolbar-actions">
+      <button class="btn" onclick="window.toggleTheme()" id="themeBtn">🌓 Tema Claro/Escuro</button>
+      <button class="btn" onclick="window.toggleEdit()" id="editBtn">✏️ Modo Edição</button>
+      <button class="btn btn-success" onclick="window.downloadEditedHtml()" id="downloadHtmlBtn">💾 Baixar HTML com Edições</button>
+      <button class="btn btn-primary" onclick="window.print()" id="printBtn">🖨️ Exportar PDF / Imprimir</button>
+    </div>
+  </div>
+
+  <div class="report-wrapper">
+    <!-- Executive Cover Section -->
+    <div class="executive-cover">
+      <div class="cover-chip">📋 Relatório Executivo Consolidado de QA</div>
+      <h1 class="cover-heading" contenteditable="true">Relatório de Testes & Evidências de Qualidade</h1>
+      <p class="cover-subheading" contenteditable="true">Consolidação detalhada com evidências fotográficas, steps de automação, planos de teste e diagnóstico de qualidade.</p>
+      
+      <!-- Metrics KPI Grid -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Total de Testes</div>
+          <div class="kpi-value">${totalCount}</div>
+          <div class="kpi-sub">Casos Selecionados</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Taxa de Sucesso</div>
+          <div class="kpi-value" style="color:var(--success);">${successRate}%</div>
+          <div class="progress-track"><div class="progress-fill" style="width:${successRate}%;"></div></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Concluídos / OK</div>
+          <div class="kpi-value" style="color:var(--success);">${doneCount}</div>
+          <div class="kpi-sub">Aprovados com Sucesso</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Em Andamento</div>
+          <div class="kpi-value" style="color:var(--warning);">${inProgressCount}</div>
+          <div class="kpi-sub">Em Execução</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Data de Emissão</div>
+          <div class="kpi-value" style="font-size:16px;padding-top:6px;">${now.split(' ')[0]}</div>
+          <div class="kpi-sub">${now.split(' ')[1] || ''}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Quality Diagnosis Summary -->
+    <div class="ai-summary-card">
+      <h2>✨ Diagnóstico Consolidado de Qualidade</h2>
+      <div class="ai-content" id="aiContent" contenteditable="true">
+        ${content
+          .replace(/^### (.+)$/gm, '<h3 style="color:var(--primary-light);font-size:15px;margin:16px 0 6px;">$1</h3>')
+          .replace(/^## (.+)$/gm, '<h2 style="color:var(--text);font-size:17px;margin:22px 0 10px;border-bottom:1px solid var(--card-border);padding-bottom:4px;">$1</h2>')
+          .replace(/^# (.+)$/gm, '<h1 style="color:var(--text);font-size:19px;margin:24px 0 12px;">$1</h1>')
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.+?)\*/g, '<em>$1</em>')
+          .replace(/`(.+?)`/g, '<code>$1</code>')
+          .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid var(--card-border);margin:24px 0;" />')
+          .replace(/^- (.+)$/gm, '<li>$1</li>')
+          .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+          .replace(/(<li>.*<\/li>\n?)+/g, s => '<ul style="margin:8px 0 14px 20px;">' + s + '</ul>')
+          .replace(/\n\n/g, '</p><p style="margin-bottom:10px;">')
+        }
+      </div>
+    </div>
+
+    <!-- Interactive Filters -->
+    <div class="filter-section">
+      <div class="filter-pills">
+        <button class="pill-btn active" onclick="window.filterStatus('all', this)">Todos (${totalCount})</button>
+        <button class="pill-btn" onclick="window.filterStatus('done', this)">Concluídos (${doneCount})</button>
+        <button class="pill-btn" onclick="window.filterStatus('in_progress', this)">Em Progresso (${inProgressCount})</button>
+        <button class="pill-btn" onclick="window.filterStatus('todo', this)">A Fazer (${todoCount})</button>
+      </div>
+      <input type="text" class="search-input" placeholder="🔍 Filtrar testes pelo título..." oninput="window.searchTests(this.value)" />
+    </div>
+
+    <!-- Detailed Test Cards List -->
+    <div id="testsContainer">
+      ${tasksCardsHtml}
+    </div>
+
+    <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:60px;padding-top:20px;border-top:1px solid var(--card-border);">
+      Relatório emitido pelo <strong>Planner QA Studio</strong> &bull; Documento Oficial de Qualidade &bull; ${now}
+    </div>
+  </div>
+
+  <!-- Lightbox Modal -->
+  <div class="lightbox-modal" id="lightboxModal" onclick="window.closeLightbox()">
+    <button class="lightbox-close" onclick="window.closeLightbox()">&times;</button>
+    <img src="" alt="Zoom" class="lightbox-img" id="lightboxImg" onclick="event.stopPropagation()" />
+    <div class="lightbox-caption" id="lightboxCaption"></div>
+  </div>
+
+  <script>
+    // 1. Lightbox Functionality (Exposto em window)
+    window.openLightboxFromEl = function(el, customCaption) {
+      if (!el) return;
+      const img = el.querySelector('img');
+      if (!img || !img.src) return;
+      let caption = customCaption || '';
+      if (!caption) {
+        const step = el.closest('.step-item');
+        const card = el.closest('.test-card');
+        if (step) {
+          const badge = step.querySelector('.step-badge');
+          const label = step.querySelector('.step-label');
+          caption = 'Passo ' + (badge ? badge.innerText : '') + ': ' + (label ? label.innerText : '');
+        } else if (card) {
+          const title = card.querySelector('.test-title');
+          caption = title ? title.innerText : 'Evidência do Teste';
+        }
+      }
+      window.openLightbox(img.src, caption);
+    };
+
+    window.openLightbox = function(src, caption) {
+      const modal = document.getElementById('lightboxModal');
+      const img = document.getElementById('lightboxImg');
+      const cap = document.getElementById('lightboxCaption');
+      if (modal && img) {
+        img.src = src;
+        if (cap) cap.innerText = caption || '';
+        modal.classList.add('active');
+      }
+    };
+
+    window.closeLightbox = function() {
+      const modal = document.getElementById('lightboxModal');
+      if (modal) modal.classList.remove('active');
+    };
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') window.closeLightbox();
+    });
+
+    // 2. Image Upload & Replacement Engine
+    window.triggerImageUpload = function(sectionEl) {
+      if (!sectionEl) return;
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = function(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function() {
+          window.setSectionImage(sectionEl, reader.result);
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    };
+
+    window.setSectionImage = function(sectionEl, dataUrl) {
+      if (!sectionEl) return;
+      const existingWrapper = sectionEl.querySelector('.evidence-preview-wrapper');
+      const existingBadge = sectionEl.querySelector('.evidence-audit-badge');
+      if (existingWrapper) {
+        const img = existingWrapper.querySelector('img');
+        if (img) img.src = dataUrl;
+      } else {
+        const titleEl = sectionEl.closest('.test-card') ? sectionEl.closest('.test-card').querySelector('.test-title') : null;
+        const cardTitle = titleEl ? titleEl.innerText : 'Evidência';
+        const newWrapper = document.createElement('div');
+        newWrapper.className = 'evidence-preview-wrapper';
+        newWrapper.onclick = function() { window.openLightboxFromEl(this, 'Evidência do Teste: ' + cardTitle); };
+        newWrapper.innerHTML = 
+          '<img src="' + dataUrl + '" alt="Evidência" class="evidence-img" />' +
+          '<div class="img-overlay"><span>🔍 Clique para zoom &bull; Pressione Ctrl+V para trocar</span></div>' +
+          '<div class="img-action-bar" onclick="event.stopPropagation()">' +
+            '<button class="img-action-pill" onclick="window.triggerImageUpload(this.closest(\'.evidence-section\'))" title="Trocar imagem">📷 Trocar</button>' +
+            '<button class="img-action-pill danger" onclick="window.removeCardImage(this)" title="Remover imagem">🗑️ Remover</button>' +
+          '</div>';
+        if (existingBadge) {
+          existingBadge.replaceWith(newWrapper);
+        } else {
+          sectionEl.appendChild(newWrapper);
+        }
+      }
+    };
+
+    window.removeCardImage = function(btnEl) {
+      const section = btnEl.closest('.evidence-section');
+      const wrapper = btnEl.closest('.evidence-preview-wrapper');
+      if (!section || !wrapper) return;
+      wrapper.remove();
+    };
+
+    // 3. Step Image Actions
+    window.triggerStepImageUpload = function(el) {
+      const stepItem = el.closest('.step-item');
+      if (!stepItem) return;
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = function(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function() {
+          window.setStepImage(stepItem, reader.result);
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    };
+
+    window.setStepImage = function(stepItem, dataUrl) {
+      if (!stepItem) return;
+      const container = stepItem.querySelector('.step-img-container') || stepItem;
+      const labelEl = stepItem.querySelector('.step-label');
+      const label = labelEl ? labelEl.innerText : 'Passo';
+      container.innerHTML = 
+        '<div class="step-img-box" onclick="window.openLightboxFromEl(this, \'' + label.replace(/'/g, "\\'") + '\')">' +
+          '<img src="' + dataUrl + '" alt="' + label.replace(/"/g, '&quot;') + '" />' +
+          '<span class="zoom-tag">🔍 Zoom</span>' +
+          '<div class="step-img-actions" onclick="event.stopPropagation()">' +
+            '<button onclick="window.triggerStepImageUpload(this)" title="Trocar imagem">📷</button>' +
+            '<button class="danger" onclick="window.removeStepImage(this)" title="Remover imagem">🗑️</button>' +
+          '</div>' +
+        '</div>';
+    };
+
+    window.removeStepImage = function(btnEl) {
+      const stepItem = btnEl.closest('.step-item');
+      const container = btnEl.closest('.step-img-container');
+      if (!stepItem || !container) return;
+      container.innerHTML = 
+        '<div class="step-img-empty" onclick="window.triggerStepImageUpload(this)">' +
+          '<span>➕ Anexar print (ou Ctrl+V)</span>' +
+        '</div>';
+    };
+
+    window.handleStepPaste = function(e, stepItemEl) {
+      const items = e.clipboardData ? e.clipboardData.items : null;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            e.stopPropagation();
+            const reader = new FileReader();
+            reader.onload = function() { window.setStepImage(stepItemEl, reader.result); };
+            reader.readAsDataURL(file);
+            break;
+          }
+        }
+      }
+    };
+
+    // 4. Global Paste (Ctrl+V) handler
+    document.addEventListener('paste', function(e) {
+      const items = e.clipboardData ? e.clipboardData.items : null;
+      if (!items) return;
+      let imageFile = null;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          imageFile = items[i].getAsFile();
+          break;
+        }
+      }
+      if (!imageFile) return;
+
+      const activeEl = document.activeElement;
+      const targetCard = activeEl ? activeEl.closest('.test-card') : (document.querySelector('.test-card:hover') || document.querySelector('.test-card'));
+      if (targetCard) {
+        const evidenceSection = targetCard.querySelector('.evidence-section');
+        if (evidenceSection) {
+          e.preventDefault();
+          const reader = new FileReader();
+          reader.onload = function() { window.setSectionImage(evidenceSection, reader.result); };
+          reader.readAsDataURL(imageFile);
+        }
+      }
+    });
+
+    // 5. Theme Switcher
+    window.toggleTheme = function() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      const btn = document.getElementById('themeBtn');
+      if (btn) {
+        btn.innerText = next === 'dark' ? '🌓 Tema Claro' : '🌓 Tema Escuro';
+      }
+    };
+
+    // 6. Editable Mode Toggle
+    let isEditing = true;
+    window.toggleEdit = function() {
+      isEditing = !isEditing;
+      document.querySelectorAll('[contenteditable]').forEach(function(el) {
+        el.contentEditable = isEditing ? 'true' : 'false';
+      });
+      const btn = document.getElementById('editBtn');
+      if (btn) {
+        btn.innerText = isEditing ? '✏️ Modo Edição (Ativo)' : '🔒 Modo Leitura';
+        btn.style.background = isEditing ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.05)';
+      }
+    };
+
+    // 7. Filter Tests by Status
+    window.filterStatus = function(status, clickedBtn) {
+      document.querySelectorAll('.pill-btn').forEach(function(b) { b.classList.remove('active'); });
+      if (clickedBtn) {
+        clickedBtn.classList.add('active');
+      } else {
+        const matchingBtn = Array.from(document.querySelectorAll('.pill-btn')).find(function(b) {
+          return b.getAttribute('onclick') && b.getAttribute('onclick').includes(status);
+        });
+        if (matchingBtn) matchingBtn.classList.add('active');
+      }
+      document.querySelectorAll('.test-card').forEach(function(card) {
+        if (status === 'all' || card.getAttribute('data-status') === status) {
+          card.style.display = 'block';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    };
+
+    // 8. Search Filter
+    window.searchTests = function(query) {
+      const q = (query || '').toLowerCase();
+      document.querySelectorAll('.test-card').forEach(function(card) {
+        const text = card.innerText.toLowerCase();
+        card.style.display = text.includes(q) ? 'block' : 'none';
+      });
+    };
+
+    // 9. Download Modified HTML
+    window.downloadEditedHtml = function() {
+      const fullHtml = '<!DOCTYPE html>' + document.documentElement.outerHTML;
+      const blob = new Blob([fullHtml], { type: 'text/html; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'relatorio-qa-evidencias-' + new Date().toISOString().slice(0, 10) + '.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
+    };
+
+    // 10. Initializer
+    function setupReportEvents() {
+      const tBtn = document.getElementById('themeBtn');
+      if (tBtn) tBtn.onclick = window.toggleTheme;
+      const eBtn = document.getElementById('editBtn');
+      if (eBtn) eBtn.onclick = window.toggleEdit;
+      const dBtn = document.getElementById('downloadHtmlBtn');
+      if (dBtn) dBtn.onclick = window.downloadEditedHtml;
+      const pBtn = document.getElementById('printBtn');
+      if (pBtn) pBtn.onclick = function() { window.print(); };
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupReportEvents);
+    } else {
+      setupReportEvents();
+    }
+  </script>
+</body>
+</html>`;
+
+      // Cria a nova janela e injeta o documento diretamente
+      const newWin = window.open('', '_blank');
+      if (newWin) {
+        newWin.document.open();
+        newWin.document.write(htmlContent);
+        newWin.document.close();
+      } else {
+        const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      }
+
+      // Também baixa o arquivo HTML como backup
+      const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const fileName = `relatorio-qa-completo-${new Date().toISOString().slice(0, 10)}.html`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err: any) {
+      alert('Erro ao gerar relatório HTML: ' + (err.message || err));
+    } finally {
+      setGeneratingTasksPdf(false);
+    }
+  };
+
   const executeBulkAutomation = async () => {
     const ids = Array.from(selectedTasks);
     if (ids.length === 0) return;
@@ -127,6 +1206,9 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
       const rawCode = (task.metadata?.automationCode as string) || "";
       const codeMatch = rawCode.match(/```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)\s*```/);
       const code = codeMatch ? codeMatch[1] : rawCode;
+      
+      // Usa a descrição da tarefa se disponível para passos completos
+      const flowDescription = task.description ? `${task.title}\n\n${task.description}` : code;
 
       try {
         if (task.status !== "in_progress") {
@@ -140,14 +1222,16 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUrl,
-            flowDescription: code,
+            flowDescription,
             jobName: task.title,
+            project_id: projectId,
             model: "auto-free",
             includeAxe: false
           })
         });
 
         let finalResult: any = null;
+        let lastErrorMsg = "";
         if (res.body) {
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
@@ -164,6 +1248,8 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                 const parsed = JSON.parse(line.startsWith("data: ") ? line.slice(6) : line);
                 if (parsed.type === "result" || parsed.type === "end") {
                   finalResult = parsed.data || parsed.result;
+                } else if (parsed.type === "error") {
+                  lastErrorMsg = parsed.error || "";
                 }
               } catch (e) {}
             }
@@ -172,14 +1258,39 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
         
         const passed = finalResult?.success === true;
         const nextStatus = passed ? "done" : "in_progress";
-        const newMetadata = { ...(task.metadata || {}), lastRunResult: finalResult };
+        
+        // Extrai a screenshot final ou o screenshot do primeiro passo executado
+        const autoEvidence = finalResult?.finalScreenshot || finalResult?.steps?.find((s: any) => s.screenshotBase64)?.screenshotBase64;
+        
+        const newMetadata = { 
+          ...(task.metadata || {}), 
+          lastRunResult: finalResult,
+          ...(autoEvidence ? { evidence: autoEvidence } : {})
+        };
         if (passed) delete (newMetadata as any).automationCode;
         
         updatedTasks = updatedTasks.map(t => t.id === task.id ? { ...t, status: nextStatus, metadata: newMetadata } : t);
         onTasksChange(updatedTasks);
         await supabase.from("tasks").update({ status: nextStatus, metadata: newMetadata, updated_at: new Date().toISOString() }).eq("id", task.id);
-      } catch (e) {
-        // Ignora e continua
+
+        // Se o teste falhou, abre o modal de intervenção manual para o usuário validar
+        if (!passed) {
+          const failedStep = finalResult?.steps?.find((s: any) => s.status !== "aprovado");
+          const errorDetail = failedStep?.detalhe || lastErrorMsg || "Automação não concluiu todos os passos com sucesso.";
+          
+          setManualTaskModal({
+            task,
+            errorMsg: errorDetail,
+            targetUrl
+          });
+          setManualEvidence(null);
+        }
+      } catch (e: any) {
+        setManualTaskModal({
+          task,
+          errorMsg: e.message || "Erro de conexão ao executar automação.",
+          targetUrl
+        });
       }
     }
     
@@ -421,15 +1532,36 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
             </button>
           ))}
         </div>
-        <button
-          id="add-task-btn"
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-all"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Nova tarefa
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => generateBulkTestPlans(tasks)}
+            disabled={isGeneratingPlans || isBatchRunning || tasks.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold hover:bg-indigo-500/20 transition-all disabled:opacity-50"
+            title="Gerar especificações e planos de teste com IA para todos os casos de teste"
+          >
+            {isGeneratingPlans ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
+            Gerar Plano para Todos
+          </button>
+          <button
+            id="add-task-btn"
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Nova tarefa
+          </button>
+        </div>
       </div>
+
+      {isGeneratingPlans && (
+        <div className="bg-indigo-500/10 border-b border-indigo-500/20 px-6 py-2.5 flex items-center justify-between text-xs text-indigo-400 font-medium animate-pulse">
+          <span className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+            {planProgress || "Gerando planos de teste estruturados com IA..."}
+          </span>
+          <span className="text-[10px] bg-indigo-500/20 px-2 py-0.5 rounded font-mono">IA EM EXECUÇÃO</span>
+        </div>
+      )}
 
       <AnimatePresence>
         {selectedTasks.size > 0 && (
@@ -444,16 +1576,25 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
             </span>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => generateBulkTestPlans()}
+                disabled={isGeneratingPlans || isBatchRunning}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 text-indigo-400 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                title="Gerar especificações e planos de teste estruturados com IA"
+              >
+                {isGeneratingPlans ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                Gerar Planos
+              </button>
+              <button
                 onClick={generateBulkAutomation}
-                disabled={isBatchRunning}
+                disabled={isBatchRunning || isGeneratingPlans}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 text-sky-500 transition-all disabled:opacity-50 flex items-center gap-1.5"
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                Gerar
+                <Code2 className="w-3.5 h-3.5" />
+                Gerar Scripts
               </button>
               <button
                 onClick={executeBulkAutomation}
-                disabled={isBatchRunning}
+                disabled={isBatchRunning || isGeneratingPlans}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 transition-all disabled:opacity-50 flex items-center gap-1.5"
               >
                 {isBatchRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
@@ -470,6 +1611,15 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-all"
               >
                 Apagar
+              </button>
+              <button
+                onClick={downloadTasksPdf}
+                disabled={isBatchRunning || generatingTasksPdf}
+                title={`Gerar Relatório Executivo Completo com todas as evidências visuais, steps e diagnóstico IA para ${selectedTasks.size} teste(s)`}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {generatingTasksPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {generatingTasksPdf ? 'Gerando Relatório...' : 'Relatório Completo (HTML)'}
               </button>
             </div>
           </motion.div>
@@ -811,6 +1961,176 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
           </div>
         )}
       </div>
+
+      {/* Modal de Notificação de Falha e Execução Manual */}
+      <AnimatePresence>
+        {manualTaskModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf("image") !== -1) {
+                  const file = items[i].getAsFile();
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = () => setManualEvidence(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }
+                }
+              }
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-card border border-border shadow-2xl rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              {/* Header com Alerta */}
+              <div className="bg-rose-500/10 border-b border-rose-500/20 px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-500 font-bold text-lg animate-pulse">
+                    ⚠️
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-foreground">Automação Não Concluída &bull; Validação Manual</h3>
+                    <p className="text-xs text-rose-400 font-medium">{manualTaskModal.task.title}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setManualTaskModal(null)}
+                  className="text-muted-foreground hover:text-foreground text-sm p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Corpo */}
+              <div className="p-6 overflow-y-auto space-y-4 text-xs">
+                {/* Detalhe do Erro */}
+                <div className="bg-rose-950/30 border border-rose-500/20 rounded-xl p-3.5 text-rose-300 font-mono text-[11px]">
+                  <strong>Motivo da Falha:</strong> {manualTaskModal.errorMsg}
+                </div>
+
+                {/* Passo a Passo para Execução Manual */}
+                <div>
+                  <h4 className="font-bold text-foreground mb-2 uppercase tracking-wider text-[11px] text-sky-400">
+                    📋 Roteiro de Passos do Teste
+                  </h4>
+                  <div className="bg-accent/30 border border-border rounded-xl p-4 text-foreground/90 whitespace-pre-wrap font-sans text-xs leading-relaxed max-h-48 overflow-y-auto">
+                    {manualTaskModal.task.description || "Nenhum passo cadastrado na descrição."}
+                  </div>
+                </div>
+
+                {/* Botão de Abertura da URL */}
+                <div className="flex items-center justify-between bg-sky-500/10 border border-sky-500/20 rounded-xl p-3.5">
+                  <div>
+                    <p className="font-bold text-sky-400">Deseja executar manualmente no navegador?</p>
+                    <p className="text-[11px] text-muted-foreground">Abra a página do teste, execute os passos e anexe o print abaixo.</p>
+                  </div>
+                  <button
+                    onClick={() => window.open(manualTaskModal.targetUrl || projectUrl || "http://localhost:3000", "_blank")}
+                    className="px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-lg transition-all shadow-md shadow-sky-500/20 flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    🔗 Abrir Site
+                  </button>
+                </div>
+
+                {/* Upload ou Paste de Evidência */}
+                <div>
+                  <h4 className="font-bold text-foreground mb-1.5 uppercase tracking-wider text-[11px] text-violet-400">
+                    📸 Anexar Evidência da Execução Manual
+                  </h4>
+                  {manualEvidence ? (
+                    <div className="relative rounded-xl overflow-hidden border border-border bg-black/40 p-2 flex justify-center items-center">
+                      <img src={manualEvidence} alt="Evidência Manual" className="max-h-40 object-contain rounded-lg" />
+                      <button
+                        onClick={() => setManualEvidence(null)}
+                        className="absolute top-3 right-3 bg-black/70 text-rose-400 hover:bg-rose-500 hover:text-white rounded-lg p-1.5 transition-all"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="border-2 border-dashed border-border/80 hover:border-violet-500/50 rounded-xl p-4 text-center cursor-pointer transition-all bg-accent/20 hover:bg-accent/40 block">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => setManualEvidence(reader.result as string);
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                      <p className="text-muted-foreground font-medium">
+                        📸 Clique para enviar print ou <strong>pressione Ctrl+V</strong> para colar a imagem
+                      </p>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Rodapé com Ações */}
+              <div className="bg-accent/20 border-t border-border px-6 py-3.5 flex items-center justify-between gap-3 flex-wrap">
+                <button
+                  onClick={() => setManualTaskModal(null)}
+                  className="px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground font-semibold"
+                >
+                  Pular / Manter Estado
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      const supabase = createClient();
+                      const t = manualTaskModal.task;
+                      const newMeta = { 
+                        ...(t.metadata || {}), 
+                        manualStatus: "failed",
+                        ...(manualEvidence ? { evidence: manualEvidence } : {})
+                      };
+                      await supabase.from("tasks").update({ status: "in_progress", metadata: newMeta, updated_at: new Date().toISOString() }).eq("id", t.id);
+                      onTasksChange(tasks.map(x => x.id === t.id ? { ...x, status: "in_progress", metadata: newMeta } : x));
+                      setManualTaskModal(null);
+                    }}
+                    className="px-3.5 py-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 text-xs font-bold transition-all"
+                  >
+                    ❌ Registrar Falha Manual
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      const supabase = createClient();
+                      const t = manualTaskModal.task;
+                      const newMeta = { 
+                        ...(t.metadata || {}), 
+                        manualStatus: "approved",
+                        manualApprovedAt: new Date().toISOString(),
+                        ...(manualEvidence ? { evidence: manualEvidence } : {})
+                      };
+                      delete (newMeta as any).automationCode;
+                      await supabase.from("tasks").update({ status: "done", metadata: newMeta, updated_at: new Date().toISOString() }).eq("id", t.id);
+                      onTasksChange(tasks.map(x => x.id === t.id ? { ...x, status: "done", metadata: newMeta } : x));
+                      setManualTaskModal(null);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-1.5"
+                  >
+                    ✓ Aprovar Manualmente (Passou)
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

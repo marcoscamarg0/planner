@@ -495,13 +495,20 @@ export function parsePortugueseRoteiro(
       continue;
     }
 
-    // 4. VERIFY / ASSERTION (Redirecionamento, Dashboard, Visibilidade)
+    // 4. VERIFY / ASSERTION (Redirecionamento, Dashboard, Visibilidade, Observação)
     if (
       lower.startsWith('verificar') || lower.startsWith('validar') ||
       lower.startsWith('checar') || lower.startsWith('conferir') ||
-      lower.startsWith('garantir') || lower.startsWith('assert') || lower.startsWith('verify')
+      lower.startsWith('garantir') || lower.startsWith('observar') ||
+      lower.startsWith('analisar') || lower.startsWith('notar') ||
+      lower.startsWith('assert') || lower.startsWith('verify')
     ) {
-      steps.push({ action: 'wait', label: raw, milliseconds: 2000 });
+      const destUrl = extractUrl(raw);
+      if (destUrl) {
+        steps.push({ action: 'wait', label: `Validar redirecionamento para: ${destUrl}`, milliseconds: 2500 });
+      } else {
+        steps.push({ action: 'wait', label: raw, milliseconds: 2000 });
+      }
       continue;
     }
 

@@ -310,6 +310,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
 
   // Simplify Report state
   const [simplifying, setSimplifying] = useState(false);
+  const [generatingConsolidatedPdf, setGeneratingConsolidatedPdf] = useState(false);
   const [showFlowModal, setShowFlowModal] = useState(false);
   const [savingFlow, setSavingFlow] = useState(false);
   const [saveFlowSuccess, setSaveFlowSuccess] = useState(false);
@@ -818,6 +819,153 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
       alert("Erro ao gerar relatório simplificado.");
     } finally {
       setSimplifying(false);
+    }
+  };
+
+  const handleDownloadConsolidatedPdf = async () => {
+    if (!selectedReportIds || selectedReportIds.length === 0) return;
+    setGeneratingConsolidatedPdf(true);
+    try {
+      const selectedReports = reports.filter(r => selectedReportIds.includes(r.id));
+
+      // Monta o conteúdo consolidado para enviar à IA
+      const reportsContent = selectedReports
+        .map((r, i) => [
+          `## ${i + 1}. ${r.title}`,
+          `**Tipo:** ${TYPE_LABEL[r.type] || r.type} | **Modelo:** ${r.model_used} | **Data:** ${new Date(r.created_at).toLocaleString('pt-BR')}`,
+          ``,
+          r.result_raw || '(sem conteúdo)',
+        ].join('\n'))
+        .join('\n\n---\n\n');
+
+      // Gera relatório executivo consolidado via IA
+      const res = await fetch('/api/ai/qa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool_type: 'consolidated_report',
+          input: [
+            `Você receberá ${selectedReports.length} relatório(s) de QA. Gere um Relatório Executivo Consolidado completo em português, contendo:`,
+            `1. **Sumário Executivo** — visão geral do que foi testado, resultados gerais e status da qualidade`,
+            `2. **Tabela de Casos de Teste** — lista de todos os testes executados com status (Aprovado / Reprovado / Bloqueado) e observações`,
+            `3. **Métricas** — total de testes, aprovados, reprovados, bloqueados, taxa de aprovação`,
+            `4. **Bugs e Falhas Encontradas** — lista detalhada de cada falha com severidade e passos de reprodução (se disponível)`,
+            `5. **Recomendações e Próximos Passos** — o que precisa ser corrigido e priorizações`,
+            `6. **Conclusão** — parecer final sobre a prontidão do sistema para produção`,
+            ``,
+            `Use formatação rica em Markdown. Seja detalhado e profissional.`,
+            ``,
+            `--- RELATÓRIOS SELECIONADOS ---`,
+            ``,
+            reportsContent,
+          ].join('\n'),
+          model: selectedModel,
+          project_id: projectId,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Erro ao gerar relatório consolidado.');
+      const data = await res.json();
+      const content = data.result || data.report?.result_raw || '';
+      if (!content) throw new Error('IA não retornou conteúdo.');
+
+      // Converte o markdown para HTML e abre para impressão/PDF
+      const now = new Date().toLocaleString('pt-BR');
+      const htmlContent = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Relatório QA Consolidado — ${now}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Outfit', Arial, sans-serif; background: #fff; color: #1a1a2e; font-size: 13px; line-height: 1.65; padding: 0; }
+    .cover { background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%); color: white; padding: 60px 48px; page-break-after: always; }
+    .cover-badge { display: inline-block; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 100px; padding: 6px 18px; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 28px; }
+    .cover h1 { font-size: 36px; font-weight: 800; margin-bottom: 12px; }
+    .cover p { font-size: 14px; opacity: 0.75; }
+    .cover-meta { margin-top: 40px; display: flex; gap: 32px; flex-wrap: wrap; }
+    .cover-meta div { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 14px 20px; }
+    .cover-meta .label { font-size: 10px; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    .cover-meta .value { font-size: 16px; font-weight: 700; }
+    .content { padding: 40px 48px; max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 22px; font-weight: 800; color: #1e1b4b; border-bottom: 3px solid #4f46e5; padding-bottom: 8px; margin: 32px 0 16px; }
+    h2 { font-size: 17px; font-weight: 700; color: #312e81; margin: 24px 0 10px; }
+    h3 { font-size: 14px; font-weight: 600; color: #4338ca; margin: 18px 0 8px; }
+    p { margin-bottom: 10px; color: #374151; }
+    ul, ol { margin: 8px 0 14px 22px; }
+    li { margin-bottom: 5px; color: #374151; }
+    strong { color: #1e1b4b; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 12px; }
+    th { background: #1e1b4b; color: white; padding: 10px 12px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { padding: 9px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    blockquote { border-left: 4px solid #4f46e5; background: #eef2ff; padding: 12px 16px; margin: 14px 0; border-radius: 0 8px 8px 0; font-style: italic; color: #4338ca; }
+    code { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 2px 6px; font-family: monospace; font-size: 11px; color: #be185d; }
+    pre { background: #1e1b4b; color: #c7d2fe; padding: 16px; border-radius: 10px; overflow-x: auto; margin: 14px 0; font-size: 11px; }
+    hr { border: none; border-top: 2px solid #e0e7ff; margin: 28px 0; }
+    .footer { border-top: 2px solid #e0e7ff; margin-top: 48px; padding-top: 16px; text-align: center; color: #9ca3af; font-size: 11px; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <div class="cover">
+    <div class="cover-badge">📋 Relatório QA Consolidado</div>
+    <h1>Relatório Executivo de Qualidade</h1>
+    <p>Análise consolidada gerada automaticamente por Inteligência Artificial</p>
+    <div class="cover-meta">
+      <div><div class="label">Relatórios</div><div class="value">${selectedReports.length}</div></div>
+      <div><div class="label">Gerado em</div><div class="value">${now}</div></div>
+    </div>
+  </div>
+  <div class="content">
+    ${content
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      .replace(/^---$/gm, '<hr />')
+      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+      .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/^(?!<[hup]|<li|<bl|<hr|<pr)/gm, '<p>')
+      .replace(/(?<!>)$/gm, '</p>')
+      .replace(/<p><\/p>/g, '')
+    }
+    <div class="footer">Gerado pelo Planner QA Studio &bull; ${now}</div>
+  </div>
+</body>
+</html>`;
+
+      const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      // Baixa o arquivo HTML editável diretamente
+      const fileName = `relatorio-consolidado-qa-${new Date().toISOString().slice(0, 10)}.html`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Também abre imediatamente em uma nova aba
+      window.open(url, '_blank');
+
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      // Salva também como relatório no histórico
+      if (data.report) {
+        loadReports();
+      }
+    } catch (err: any) {
+      alert('Erro ao gerar relatório HTML: ' + (err.message || err));
+    } finally {
+      setGeneratingConsolidatedPdf(false);
     }
   };
 
@@ -2003,6 +2151,15 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                               >
                                 {simplifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                                 Resumo Simplificado
+                              </button>
+                              <button
+                                onClick={handleDownloadConsolidatedPdf}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20 rounded-lg hover:bg-violet-500/20 transition-colors disabled:opacity-50"
+                                disabled={isManagingReports || generatingConsolidatedPdf}
+                                title={`Gerar HTML consolidado e editável com IA para ${selectedReportIds.length} relatório(s) selecionado(s)`}
+                              >
+                                {generatingConsolidatedPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                {generatingConsolidatedPdf ? 'Gerando HTML...' : 'HTML Editável (IA)'}
                               </button>
                               <button
                                 onClick={() => setExportingReportIds(selectedReportIds)}

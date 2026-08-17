@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { callOpenRouter } from "@/lib/openrouter/client";
+
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
@@ -10,78 +13,76 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { taskTitle, projectTitle } = await req.json();
+    const { taskTitle, projectTitle, projectUrl, currentDescription } = await req.json();
 
     if (!taskTitle) {
       return NextResponse.json({ error: "Task title is required" }, { status: 400 });
     }
 
-    // Busca as referências do usuário para dar contexto à IA
-    const { data: references } = await supabase
-      .from("knowledge_sources")
-      .select("title, type, content")
-      .eq("owner_id", user.id)
-      .limit(10);
-    
-    const contextText = references && references.length > 0 
-      ? "\n\n=== CONTEXTO DO USUÁRIO (Referências) ===\n" + 
-        references.map(r => `[${r.type}] ${r.title}\n${(r.content || "").slice(0, 1000)}`).join("\n\n") + 
-        "\n========================================="
-      : "";
+    const sysPrompt = [
+      "Você é um Especialista Sênior em Engenharia de Qualidade de Software (QA Lead) e Automação de Testes.",
+      "Sua missão é criar uma Especificação e Plano de Teste Completo, Profissional e Executável para o caso de teste fornecido.",
+      "O plano DEVE conter as seguintes seções em Markdown limpo:",
+      "",
+      "### 🎯 Objetivo do Teste",
+      "(Descrição clara do que está sendo validado e o valor de negócio)",
+      "",
+      "### 📋 Pré-requisitos & Dados de Entrada",
+      "- URL / Ambiente: " + (projectUrl || "Ambiente de Testes"),
+      "- Credenciais / Massa de dados necessária",
+      "- Estado inicial da aplicação",
+      "",
+      "### 📝 Roteiro de Execução (Passo a Passo)",
+      "1. Acessar a página inicial...",
+      "2. Localizar o componente / botão...",
+      "3. Executar a ação de clique / preenchimento...",
+      "4. Observar a transição ou redirecionamento...",
+      "5. Validar o resultado na interface...",
+      "",
+      "### 🔍 Critérios de Aceite & Resultado Esperado",
+      "- O sistema deve processar a requisição sem erros de JavaScript ou rede.",
+      "- A interface deve apresentar o feedback visual ou redirecionamento correto.",
+      "",
+      "IMPORTANTE: Responda EXCLUSIVAMENTE em Português (PT-BR) com o Markdown estruturado. Não adicione introduções ou conversas."
+    ].join("\n");
 
-    const openRouterApiKey = process.env.OPENROUTER_API_KEY;
-    if (!openRouterApiKey) {
-      throw new Error("Missing OPENROUTER_API_KEY");
+    const userPrompt = [
+      "Projeto: " + (projectTitle || "Sistema Web"),
+      "URL Alvo: " + (projectUrl || "https://..."),
+      "Caso de Teste / Tarefa: " + taskTitle,
+      currentDescription ? "Detalhes Adicionais Existentes:\n" + currentDescription : "",
+      "\nEscreva o Plano de Teste detalhado com passos numerados para execução."
+    ].join("\n");
+
+    const plan = await callOpenRouter([
+      { role: "system", content: sysPrompt },
+      { role: "user", content: userPrompt }
+    ], { max_tokens: 1500, temperature: 0.2 });
+
+    if (!plan) {
+      // Fallback determinístico caso nenhuma IA responda
+      const fallbackPlan = `### 🎯 Objetivo do Teste
+Validar o fluxo funcional e a integridade da funcionalidade: ${taskTitle}.
+
+### 📋 Pré-requisitos & Dados de Entrada
+- Acesso à URL: ${projectUrl || "Ambiente de Teste"}
+- Navegador atualizado e conexão estável
+
+### 📝 Roteiro de Execução (Passo a Passo)
+1. Acessar a página inicial da aplicação
+2. Navegar até a seção correspondente ao caso de teste
+3. Executar as interações necessárias de preenchimento ou clique
+4. Observar a resposta e integridade visual dos componentes
+5. Registrar a evidência fotográfica da tela
+
+### 🔍 Critérios de Aceite & Resultado Esperado
+- Operação realizada com sucesso sem ocorrência de erros visuais ou de console.`;
+      return NextResponse.json({ plan: fallbackPlan });
     }
-
-    const model = process.env.OPENROUTER_MODEL_CHAT || "openrouter/free";
-
-    const sysPrompt =
-      "Voce e um especialista em planejamento estrategico governamental. " +
-      "Seu objetivo e gerar um passo a passo detalhado e pratico de como executar a tarefa solicitada. " +
-      "Responda APENAS com o passo a passo em formato Markdown. " +
-      "Nao adicione introducoes ou conclusoes desnecessarias. Seja direto, executivo e estruturado.";
-
-    const userPrompt =
-      "Projeto: " + (projectTitle || "Nao especificado") +
-      "\nTarefa: " + taskTitle +
-      contextText +
-      "\n\nEscreva um plano de acao detalhado (passo a passo) para executar esta demanda.";
-
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": "Bearer " + openRouterApiKey,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "Governo AI Planner",
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: "system", content: sysPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.3,
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error("OpenRouter error:", err);
-      return NextResponse.json({ error: "Falha na IA" }, { status: 500 });
-    }
-
-    const data = await response.json();
-    const plan = data.choices[0]?.message?.content || "Nao foi possivel gerar o plano.";
 
     return NextResponse.json({ plan });
-
   } catch (error: any) {
-    console.error("Task Plan Error:", error);
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    );
+    console.error("AI task-plan error:", error);
+    return NextResponse.json({ error: error.message || "Internal error" }, { status: 500 });
   }
 }
