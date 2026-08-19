@@ -31,6 +31,7 @@ export function ProjectsClient({
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
