@@ -12,12 +12,20 @@ import Link from "next/link";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 interface ProjectsClientProps {
-  projectsWithStats: ProjectWithStats[];
+  projectsWithStats?: ProjectWithStats[];
+  initialProjects?: ProjectWithStats[];
   userId?: string;
+  currentUserId?: string;
 }
 
-export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProps) {
-  const [projects, setProjects] = useState(projectsWithStats);
+export function ProjectsClient({
+  projectsWithStats,
+  initialProjects,
+  userId,
+  currentUserId,
+}: ProjectsClientProps) {
+  const initial = projectsWithStats ?? initialProjects ?? [];
+  const [projects, setProjects] = useState<ProjectWithStats[]>(initial);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "all">("all");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -38,20 +46,23 @@ export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProp
       ...prev,
     ]);
     setNewProjectOpen(false);
-    router.push(`/projects/${project.id}`);
+    window.open(`/projects/${project.id}`, "_blank");
     router.refresh();
   };
 
-  const filtered = projects.filter((p) => {
-    const matchSearch =
-      p.title.toLowerCase().includes(search.toLowerCase()) ||
-      (p.description ?? "").toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === "all" || p.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
-  const isFiltering = search.trim() !== "" || statusFilter !== "all";
-  const displayProjects = isFiltering ? filtered : projects.filter(p => !p.parent_id);
+  const displayProjects = useMemo(() => {
+    const list = projects ?? [];
+    const isFiltering = search.trim() !== "" || statusFilter !== "all";
+    const filtered = list.filter((p) => {
+      const matchSearch =
+        search.trim() === "" ||
+        (p.title || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.description ?? "").toLowerCase().includes(search.toLowerCase());
+      const matchStatus = statusFilter === "all" || p.status === statusFilter;
+      return matchSearch && matchStatus;
+    });
+    return isFiltering ? filtered : list.filter((p) => !p.parent_id);
+  }, [projects, search, statusFilter]);
 
   const statusFilters: { value: ProjectStatus | "all"; label: string }[] = [
     { value: "all", label: "Todos" },
@@ -201,7 +212,9 @@ export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProp
               </thead>
               <tbody className="divide-y divide-border">
                 {displayProjects.map((project, index) => {
-                  const progressRate = project.total_tasks > 0
+                  const progressRate = project.status === "completed"
+                    ? 100
+                    : project.total_tasks > 0
                     ? Math.round((project.completed_tasks / project.total_tasks) * 100)
                     : 0;
                   const isSelected = selectedIds.has(project.id);
@@ -227,7 +240,12 @@ export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProp
                         </button>
                       </td>
                       <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
-                        <Link href={`/projects/${project.id}`} className="flex items-center gap-3">
+                        <Link
+                          href={`/projects/${project.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3"
+                        >
                           <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${project.color}20` }}>
                             <span className="text-sm">{project.emoji ?? "📁"}</span>
                           </div>
@@ -256,16 +274,24 @@ export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProp
                       </td>
                       <td className="px-4 py-3 w-48">
                         <div className="flex items-center gap-3">
-                          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="flex-1 h-2 bg-muted/80 rounded-full overflow-hidden">
                             <div 
-                              className="h-full bg-primary rounded-full transition-all duration-500"
-                              style={{ width: `${progressRate}%` }}
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${progressRate}%`,
+                                backgroundColor: progressRate > 0 ? (project.color || "#6366f1") : undefined,
+                              }}
                             />
                           </div>
-                          <span className="text-xs text-muted-foreground w-8 text-right">{progressRate}%</span>
+                          <span className={cn(
+                            "text-xs font-semibold w-9 text-right",
+                            progressRate > 0 ? "text-foreground" : "text-muted-foreground"
+                          )}>
+                            {progressRate}%
+                          </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center text-muted-foreground text-xs">
+                      <td className="px-4 py-3 text-center text-muted-foreground text-xs font-medium">
                         {project.completed_tasks}/{project.total_tasks}
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -276,6 +302,8 @@ export function ProjectsClient({ projectsWithStats, userId }: ProjectsClientProp
                       <td className="px-4 py-3 text-right">
                         <Link 
                           href={`/projects/${project.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border transition-all"
                         >
                           <ArrowRight className="w-4 h-4" />

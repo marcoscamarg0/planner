@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Loader2, CheckSquare, Circle, Clock, XCircle, Sparkles, Maximize2, Play, Code2, FileDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -63,6 +63,24 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     const match = title.match(/(?:TC|CT|TESTE)[\s_-]?(\d+)/i);
     return match ? parseInt(match[1], 10) : 999999;
   };
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) =>
+      filterStatus === "all" ? true : t.status === filterStatus
+    );
+  }, [tasks, filterStatus]);
+
+  const sortedParentTasks = useMemo(() => {
+    const parentList = filteredTasks.filter(
+      (t) => !t.parent_task_id || !tasks.some((p) => p.id === t.parent_task_id)
+    );
+    return parentList.sort((a, b) => {
+      const numA = extractTcNumber(a.title);
+      const numB = extractTcNumber(b.title);
+      if (numA !== numB) return numA - numB;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+  }, [filteredTasks, tasks]);
 
   const generateBulkAutomation = async () => {
     const ids = Array.from(selectedTasks);
@@ -566,227 +584,234 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Relatório Executivo de QA & Testes — ${now}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
     
     :root {
-      --bg: #090d16;
-      --card-bg: #111726;
-      --card-border: rgba(255, 255, 255, 0.08);
-      --text: #f1f5f9;
+      --bg: #071224;
+      --card-bg: #0d1b33;
+      --card-border: rgba(255, 255, 255, 0.1);
+      --text: #f8fafc;
       --text-muted: #94a3b8;
-      --primary: #6366f1;
-      --primary-light: #818cf8;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --code-bg: #060911;
+      --primary: #1351b4;
+      --primary-light: #5992ed;
+      --success: #168821;
+      --warning: #ffcd07;
+      --danger: #e52207;
+      --code-bg: #050c18;
     }
 
     [data-theme="light"] {
-      --bg: #f8fafc;
+      --bg: #f4f6f9;
       --card-bg: #ffffff;
-      --card-border: #e2e8f0;
-      --text: #0f172a;
-      --text-muted: #475569;
-      --code-bg: #f1f5f9;
+      --card-border: #d1d5db;
+      --text: #1f2937;
+      --text-muted: #4b5563;
+      --primary: #1351b4;
+      --primary-light: #1351b4;
+      --success: #168821;
+      --warning: #c2850c;
+      --danger: #e52207;
+      --code-bg: #f3f4f6;
     }
-    [data-theme="light"] .top-toolbar { background: rgba(255, 255, 255, 0.92); }
-    [data-theme="light"] .brand-tag { color: #0f172a; }
-    [data-theme="light"] .btn { background: #f8fafc; color: #0f172a; border-color: #cbd5e1; }
-    [data-theme="light"] .btn:hover { background: #e2e8f0; }
-    [data-theme="light"] .description-box { background: #f8fafc; border-color: #e2e8f0; color: #334155; }
-    [data-theme="light"] .step-item { background: #ffffff; border-color: #e2e8f0; }
-    [data-theme="light"] .evidence-audit-badge { background: #f1f5f9; border-color: #cbd5e1; }
-    [data-theme="light"] .search-input { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
-    [data-theme="light"] .pill-btn { background: #ffffff; color: #475569; border-color: #cbd5e1; }
-    [data-theme="light"] .pill-btn.active { background: #6366f1; color: #ffffff; border-color: #6366f1; }
+    [data-theme="light"] .top-toolbar { background: #ffffff !important; border-color: #d1d5db !important; }
+    [data-theme="light"] .brand-tag { color: #111827 !important; }
+    [data-theme="light"] .btn { background: #f3f4f6 !important; color: #111827 !important; border-color: #d1d5db !important; }
+    [data-theme="light"] .btn:hover { background: #e5e7eb !important; }
+    [data-theme="light"] .description-box { background: #f9fafb !important; border-color: #e5e7eb !important; color: #374151 !important; }
+    [data-theme="light"] .step-item { background: #ffffff !important; border-color: #e5e7eb !important; }
+    [data-theme="light"] .evidence-audit-badge { background: #f0fdf4 !important; border-color: #bbf7d0 !important; color: #166534 !important; }
+    [data-theme="light"] .search-input { background: #ffffff !important; color: #111827 !important; border-color: #d1d5db !important; }
+    [data-theme="light"] .pill-btn { background: #ffffff !important; color: #4b5563 !important; border-color: #d1d5db !important; }
+    [data-theme="light"] .pill-btn.active { background: #1351b4 !important; color: #ffffff !important; border-color: #1351b4 !important; }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Outfit', -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; transition: background 0.3s, color 0.3s; padding-bottom: 100px; }
+    body { font-family: 'Raleway', -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; transition: background 0.25s, color 0.25s; padding-bottom: 80px; }
 
-    /* Sticky Interactive Control Bar */
-    .top-toolbar { position: sticky; top: 0; z-index: 1000; background: rgba(9, 13, 22, 0.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--card-border); padding: 12px 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    /* Top Control Bar */
+    .top-toolbar { position: sticky; top: 0; z-index: 999999; background: #071224; border-bottom: 2px solid #1351b4; padding: 12px 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
     .toolbar-left { display: flex; align-items: center; gap: 12px; }
-    .brand-tag { font-weight: 800; font-size: 14px; color: #fff; display: flex; align-items: center; gap: 8px; letter-spacing: -0.5px; }
-    .brand-tag span { background: linear-gradient(135deg, #6366f1, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .brand-tag { font-weight: 800; font-size: 14px; color: #fff; display: flex; align-items: center; gap: 8px; letter-spacing: -0.3px; }
+    .brand-tag span { color: #5992ed; }
     
     .toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .btn { appearance: none; border: 1px solid var(--card-border); background: rgba(255,255,255,0.05); color: var(--text); padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; font-family: inherit; }
-    .btn:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px); }
-    .btn-primary { background: linear-gradient(135deg, #6366f1, #4f46e5); border: none; color: #fff; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
-    .btn-success { background: linear-gradient(135deg, #10b981, #059669); border: none; color: #fff; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3); }
+    .btn { appearance: none; border: 1px solid var(--card-border); background: rgba(255,255,255,0.08); color: var(--text); padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer !important; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; font-family: inherit; user-select: none; }
+    .btn:hover { background: rgba(255,255,255,0.18); transform: translateY(-1px); }
+    .btn-primary { background: #1351b4 !important; border: 1px solid #2670e8 !important; color: #fff !important; }
+    .btn-primary:hover { background: #0c326f !important; }
+    .btn-success { background: #168821 !important; border: 1px solid #268744 !important; color: #fff !important; }
+    .btn-success:hover { background: #106619 !important; }
     
     /* Layout Container */
-    .report-wrapper { max-width: 1050px; margin: 32px auto; padding: 0 20px; }
+    .report-wrapper { max-width: 1080px; margin: 32px auto; padding: 0 20px; }
 
     /* Executive Hero Cover */
-    .executive-cover { background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 48px; position: relative; overflow: hidden; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); margin-bottom: 32px; }
-    .executive-cover::after { content: ''; position: absolute; top: -50%; right: -20%; width: 400px; height: 400px; background: radial-gradient(circle, rgba(99, 102, 241, 0.3), transparent 70%); border-radius: 50%; pointer-events: none; }
-    .cover-chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(99, 102, 241, 0.25); border: 1px solid rgba(99, 102, 241, 0.4); padding: 6px 16px; border-radius: 100px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #c7d2fe; margin-bottom: 20px; }
-    .cover-heading { font-size: 36px; font-weight: 900; line-height: 1.2; margin-bottom: 12px; color: #fff; }
-    .cover-subheading { font-size: 15px; color: #cbd5e1; max-width: 700px; }
+    .executive-cover { background: linear-gradient(135deg, #071d41 0%, #0c326f 50%, #1351b4 100%); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 40px; position: relative; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.3); margin-bottom: 28px; }
+    .cover-chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); padding: 5px 14px; border-radius: 100px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #fff; margin-bottom: 16px; }
+    .cover-heading { font-size: 32px; font-weight: 900; line-height: 1.2; margin-bottom: 10px; color: #fff; }
+    .cover-subheading { font-size: 15px; color: #dbe8fb; max-width: 760px; line-height: 1.5; }
     
     /* KPI Stats Row */
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-top: 36px; }
-    .kpi-card { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; text-align: left; }
-    .kpi-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-    .kpi-value { font-size: 28px; font-weight: 900; color: #fff; }
-    .kpi-sub { font-size: 11px; color: #cbd5e1; margin-top: 4px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-top: 28px; }
+    .kpi-card { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; padding: 18px; text-align: left; }
+    .kpi-label { font-size: 11px; font-weight: 700; color: #c5d4eb; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+    .kpi-value { font-size: 26px; font-weight: 900; color: #fff; }
+    .kpi-sub { font-size: 11px; color: #dbe8fb; margin-top: 4px; }
     
     /* Progress Bar */
-    .progress-track { width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 100px; margin-top: 10px; overflow: hidden; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #10b981, #34d399); border-radius: 100px; transition: width 0.5s ease; }
+    .progress-track { width: 100%; height: 8px; background: rgba(255,255,255,0.15); border-radius: 100px; margin-top: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #268744; border-radius: 100px; transition: width 0.5s ease; }
 
     /* Executive AI Summary Box */
-    .ai-summary-card { background: var(--card-bg); border: 1px solid var(--card-border); border-left: 5px solid var(--primary); border-radius: 20px; padding: 32px; margin-bottom: 32px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-    .ai-summary-card h2 { font-size: 20px; font-weight: 800; margin-bottom: 16px; color: var(--primary-light); display: flex; align-items: center; gap: 8px; }
-    .ai-content { font-size: 14px; color: var(--text-muted); line-height: 1.8; }
+    .ai-summary-card { background: var(--card-bg); border: 1px solid var(--card-border); border-left: 5px solid #1351b4; border-radius: 10px; padding: 28px; margin-bottom: 28px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .ai-summary-card h2 { font-size: 18px; font-weight: 800; margin-bottom: 16px; color: var(--primary-light); display: flex; align-items: center; gap: 8px; }
+    .ai-content { font-size: 14px; color: var(--text-muted); line-height: 1.7; }
     .ai-content strong { color: var(--text); }
-    .ai-content ul, .ai-content ol { margin: 12px 0 16px 24px; }
-    .ai-content li { margin-bottom: 6px; }
-    .ai-content table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
-    .ai-content th { background: rgba(99, 102, 241, 0.15); padding: 10px 14px; text-align: left; font-weight: 700; color: var(--text); border-bottom: 1px solid var(--card-border); }
-    .ai-content td { padding: 10px 14px; border-bottom: 1px solid var(--card-border); color: var(--text-muted); }
+    .ai-content ul, .ai-content ol { margin: 10px 0 14px 20px; }
+    .ai-content li { margin-bottom: 4px; }
+    .ai-content table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13px; }
+    .ai-content th { background: rgba(19, 81, 180, 0.12); padding: 10px 12px; text-align: left; font-weight: 700; color: var(--text); border-bottom: 2px solid var(--card-border); }
+    .ai-content td { padding: 10px 12px; border-bottom: 1px solid var(--card-border); color: var(--text-muted); }
 
     /* Filter & Search Bar */
-    .filter-section { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 32px 0 20px; flex-wrap: wrap; }
+    .filter-section { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 28px 0 18px; flex-wrap: wrap; }
     .filter-pills { display: flex; gap: 8px; flex-wrap: wrap; }
-    .pill-btn { padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 700; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
-    .pill-btn.active, .pill-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
-    .search-input { background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text); padding: 8px 16px; border-radius: 100px; font-size: 12px; outline: none; width: 240px; }
+    .pill-btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-muted); cursor: pointer !important; transition: all 0.2s; user-select: none; }
+    .pill-btn.active, .pill-btn:hover { background: #1351b4; color: #fff; border-color: #1351b4; }
+    .search-input { background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text); padding: 8px 14px; border-radius: 6px; font-size: 12px; outline: none; width: 240px; font-family: inherit; }
 
     /* Test Case Detailed Card */
-    .test-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 20px; margin-bottom: 28px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.15); page-break-inside: avoid; }
-    .test-header { padding: 24px 32px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-    .test-title-wrapper { display: flex; align-items: center; gap: 14px; }
-    .test-index { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 800; background: rgba(99, 102, 241, 0.15); color: var(--primary-light); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.3); }
-    .test-title { font-size: 18px; font-weight: 800; color: var(--text); outline: none; }
+    .test-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); page-break-inside: avoid; }
+    .test-header { padding: 18px 24px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .test-title-wrapper { display: flex; align-items: center; gap: 12px; }
+    .test-index { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 800; background: rgba(19, 81, 180, 0.15); color: var(--primary-light); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(19, 81, 180, 0.3); }
+    .test-title { font-size: 16px; font-weight: 800; color: var(--text); outline: none; }
     .test-badges { display: flex; align-items: center; gap: 8px; }
-    .badge { font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 100px; letter-spacing: 0.5px; text-transform: uppercase; }
+    .badge { font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
     
     /* Visual Cues for Editable Content */
-    [contenteditable="true"] { outline: none; transition: background 0.2s, box-shadow 0.2s; border-radius: 6px; padding: 2px 4px; }
-    [contenteditable="true"]:hover { background: rgba(99, 102, 241, 0.08); cursor: text; }
-    [contenteditable="true"]:focus { background: rgba(99, 102, 241, 0.15); box-shadow: 0 0 0 2px var(--primary); }
+    [contenteditable="true"] { outline: none; transition: background 0.2s; border-radius: 4px; padding: 2px 4px; }
+    [contenteditable="true"]:hover { background: rgba(19, 81, 180, 0.08); cursor: text; }
+    [contenteditable="true"]:focus { background: rgba(19, 81, 180, 0.15); box-shadow: 0 0 0 2px #1351b4; }
 
-    .test-body { padding: 32px; display: flex; flex-direction: column; gap: 24px; }
-    .section-block { display: flex; flex-direction: column; gap: 10px; }
-    .section-title { font-size: 13px; font-weight: 700; color: var(--primary-light); text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 6px; }
+    .test-body { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+    .section-block { display: flex; flex-direction: column; gap: 8px; }
+    .section-title { font-size: 12px; font-weight: 800; color: var(--primary-light); text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; gap: 6px; }
     
-    .description-box { background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 14px; padding: 18px 22px; font-size: 14px; color: var(--text-muted); line-height: 1.7; outline: none; }
+    .description-box { background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 14px 18px; font-size: 13px; color: var(--text-muted); line-height: 1.6; outline: none; }
     .description-box strong { color: var(--text); }
 
     /* Evidence Audit Badge */
-    .evidence-audit-badge { background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 14px; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-    .audit-icon { font-size: 28px; }
+    .evidence-audit-badge { background: rgba(22, 136, 33, 0.06); border: 1px solid rgba(22, 136, 33, 0.25); border-radius: 8px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; cursor: pointer; }
+    .audit-icon { font-size: 24px; }
     .audit-details { flex: 1; min-width: 200px; }
-    .audit-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+    .audit-title { font-size: 13px; font-weight: 800; color: var(--text); margin-bottom: 2px; }
     .audit-desc { font-size: 12px; color: var(--text-muted); }
     .audit-desc strong { color: var(--text); }
     .audit-date { font-size: 11px; color: var(--primary-light); font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
-    .audit-tag { font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 100px; background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); letter-spacing: 1px; }
+    .audit-tag { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 4px; background: rgba(22, 136, 33, 0.15); color: var(--success); border: 1px solid rgba(22, 136, 33, 0.3); letter-spacing: 0.8px; }
 
-    /* Evidence Image Previews */
-    .evidence-preview-wrapper { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--card-border); background: #000; cursor: pointer; max-width: 100%; max-height: 420px; display: flex; justify-content: center; align-items: center; }
-    .evidence-img { max-width: 100%; max-height: 420px; object-fit: contain; display: block; transition: transform 0.3s; }
-    .evidence-preview-wrapper:hover .evidence-img { transform: scale(1.02); }
-    .img-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; display: flex; align-items: center; justify-content: center; transition: opacity 0.2s; color: #fff; font-weight: 700; font-size: 13px; }
+    /* Evidence Image Previews (Zoomable) */
+    .evidence-preview-wrapper { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--card-border); background: #000; cursor: zoom-in !important; max-width: 100%; max-height: 420px; display: flex; justify-content: center; align-items: center; }
+    .evidence-img { max-width: 100%; max-height: 420px; object-fit: contain; display: block; transition: transform 0.2s; cursor: zoom-in !important; }
+    .evidence-preview-wrapper:hover .evidence-img { transform: scale(1.015); }
+    .img-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; display: flex; align-items: center; justify-content: center; transition: opacity 0.2s; color: #fff; font-weight: 700; font-size: 13px; cursor: zoom-in !important; }
     .evidence-preview-wrapper:hover .img-overlay { opacity: 1; }
 
     /* Step-by-Step Grid */
-    .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 8px; }
-    .step-item { background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 6px; }
+    .step-item { background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
     .step-item.step-ok { border-left: 4px solid var(--success); }
     .step-item.step-fail { border-left: 4px solid var(--danger); }
     .step-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
-    .step-badge { width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; }
+    .step-badge { width: 22px; height: 22px; border-radius: 4px; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; }
     .step-label { font-weight: 700; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .step-status { font-weight: 800; font-size: 10px; padding: 2px 8px; border-radius: 100px; }
-    .status-ok { color: var(--success); background: rgba(16, 185, 129, 0.15); }
-    .status-fail { color: var(--danger); background: rgba(239, 68, 68, 0.15); }
-    .step-detail { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
-    .step-img-box { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--card-border); height: 140px; cursor: pointer; }
-    .step-img-box img { width: 100%; height: 100%; object-fit: cover; }
-    .zoom-tag { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+    .step-status { font-weight: 800; font-size: 10px; padding: 2px 8px; border-radius: 4px; }
+    .status-ok { color: var(--success); background: rgba(22, 136, 33, 0.15); }
+    .status-fail { color: var(--danger); background: rgba(229, 34, 7, 0.15); }
+    .step-detail { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+    .step-img-box { position: relative; border-radius: 6px; overflow: hidden; border: 1px solid var(--card-border); height: 140px; cursor: zoom-in !important; }
+    .step-img-box img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in !important; }
+    .zoom-tag { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.75); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; cursor: zoom-in !important; }
 
     /* Image Edit Bars and Actions */
-    .img-edit-btn { background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary-light); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
-    .img-edit-btn:hover { background: var(--primary); color: #fff; }
-    .img-action-bar { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; z-index: 10; opacity: 0; transition: opacity 0.2s; }
+    .img-edit-btn { background: rgba(19, 81, 180, 0.15); border: 1px solid rgba(19, 81, 180, 0.3); color: var(--primary-light); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+    .img-edit-btn:hover { background: #1351b4; color: #fff; }
+    .img-action-bar { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 10; opacity: 0; transition: opacity 0.2s; }
     .evidence-preview-wrapper:hover .img-action-bar { opacity: 1; }
-    .img-action-pill { background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.25); color: #fff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s; backdrop-filter: blur(8px); }
-    .img-action-pill:hover { background: #6366f1; border-color: #818cf8; }
-    .img-action-pill.danger:hover { background: #ef4444; border-color: #f87171; }
+    .img-action-pill { background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.25); color: #fff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+    .img-action-pill:hover { background: #1351b4; }
+    .img-action-pill.danger:hover { background: #e52207; }
     
-    .step-img-container { margin-top: 8px; }
+    .step-img-container { margin-top: 6px; }
     .step-img-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 10; opacity: 0; transition: opacity 0.2s; }
     .step-img-box:hover .step-img-actions { opacity: 1; }
-    .step-img-actions button { background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.3); color: #fff; width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; }
-    .step-img-actions button:hover { background: #6366f1; }
-    .step-img-actions button.danger:hover { background: #ef4444; }
+    .step-img-actions button { background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.3); color: #fff; width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px; }
+    .step-img-actions button:hover { background: #1351b4; }
+    .step-img-actions button.danger:hover { background: #e52207; }
     
-    .step-img-empty { border: 1px dashed var(--card-border); border-radius: 8px; padding: 12px; text-align: center; color: var(--text-muted); font-size: 11px; cursor: pointer; background: rgba(255,255,255,0.01); transition: all 0.2s; }
-    .step-img-empty:hover { border-color: var(--primary); color: var(--primary-light); background: rgba(99, 102, 241, 0.05); }
+    .step-img-empty { border: 1px dashed var(--card-border); border-radius: 6px; padding: 10px; text-align: center; color: var(--text-muted); font-size: 11px; cursor: pointer; background: rgba(255,255,255,0.01); transition: all 0.2s; }
+    .step-img-empty:hover { border-color: #1351b4; color: var(--primary-light); background: rgba(19, 81, 180, 0.05); }
 
     /* Code Box */
-    .code-box { background: var(--code-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #a5b4fc; line-height: 1.6; }
+    .code-box { background: var(--code-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #93c5fd; line-height: 1.6; }
 
-    /* Lightbox Modal */
-    .lightbox-modal { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,0.92); backdrop-filter: blur(12px); display: none; align-items: center; justify-content: center; padding: 40px; flex-direction: column; pointer-events: none; }
-    .lightbox-modal.active { display: flex !important; pointer-events: auto !important; }
-    .lightbox-img { max-width: 95%; max-height: 85vh; object-fit: contain; border-radius: 12px; box-shadow: 0 25px 60px rgba(0,0,0,0.8); }
-    .lightbox-caption { color: #fff; font-size: 14px; font-weight: 700; margin-top: 16px; }
-    .lightbox-close { position: absolute; top: 24px; right: 24px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; font-size: 20px; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    /* Lightbox Modal (Full Resolution Zoom) */
+    .lightbox-modal { position: fixed; inset: 0; z-index: 9999999; background: rgba(0,0,0,0.92); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; padding: 30px; flex-direction: column; }
+    .lightbox-modal.active { display: flex !important; }
+    .lightbox-img { max-width: 95vw; max-height: 85vh; object-fit: contain; border-radius: 8px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); }
+    .lightbox-caption { color: #f8fafc; font-size: 14px; font-weight: 700; margin-top: 14px; text-align: center; max-width: 800px; }
+    .lightbox-close { position: absolute; top: 20px; right: 24px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; font-size: 22px; width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+    .lightbox-close:hover { background: #e52207; border-color: #e52207; }
 
-    /* Print Formatting */
+    /* Print / PDF Formatting */
     @media print {
-      body { background: #fff !important; color: #0f172a !important; font-size: 13px !important; }
+      body { background: #fff !important; color: #111827 !important; font-size: 12px !important; }
       .top-toolbar, .filter-section, .lightbox-modal { display: none !important; }
       .report-wrapper { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
       
-      .executive-cover { background: #1e1b4b !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; page-break-after: always; margin-bottom: 30px; border-radius: 0; padding: 36px; }
-      .cover-heading { color: #fff !important; font-size: 28px !important; }
-      .cover-subheading { color: #cbd5e1 !important; }
-      .kpi-card { background: rgba(255,255,255,0.12) !important; border: 1px solid #4338ca !important; }
+      .executive-cover { background: #071d41 !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; page-break-after: always; margin-bottom: 24px; border-radius: 0; padding: 30px; }
+      .cover-heading { color: #fff !important; font-size: 26px !important; }
+      .cover-subheading { color: #dbe8fb !important; }
+      .kpi-card { background: rgba(255,255,255,0.1) !important; border: 1px solid #2670e8 !important; }
       .kpi-value { color: #fff !important; }
       
-      .ai-summary-card { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; border-left: 5px solid #6366f1 !important; color: #1e293b !important; page-break-inside: avoid; margin-bottom: 24px; }
-      .ai-content { color: #334155 !important; }
-      .ai-content th { background: #e2e8f0 !important; color: #0f172a !important; border-color: #cbd5e1 !important; }
-      .ai-content td { border-color: #e2e8f0 !important; color: #334155 !important; }
+      .ai-summary-card { background: #f9fafb !important; border: 1px solid #d1d5db !important; border-left: 5px solid #1351b4 !important; color: #1f2937 !important; page-break-inside: avoid; margin-bottom: 20px; }
+      .ai-content { color: #374151 !important; }
+      .ai-content th { background: #e5e7eb !important; color: #111827 !important; border-color: #d1d5db !important; }
+      .ai-content td { border-color: #e5e7eb !important; color: #374151 !important; }
       
-      .test-card { box-shadow: none !important; border: 1px solid #cbd5e1 !important; margin-bottom: 24px !important; background: #ffffff !important; page-break-inside: avoid; border-radius: 12px; }
-      .test-header { background: #f8fafc !important; border-bottom: 1px solid #cbd5e1 !important; padding: 16px 20px !important; }
-      .test-title { color: #0f172a !important; font-size: 16px !important; }
-      .section-title { color: #4338ca !important; font-size: 12px !important; }
-      .description-box { background: #f8fafc !important; color: #334155 !important; border: 1px solid #cbd5e1 !important; padding: 14px !important; }
-      .code-box { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #cbd5e1 !important; page-break-inside: avoid; }
+      .test-card { box-shadow: none !important; border: 1px solid #d1d5db !important; margin-bottom: 20px !important; background: #ffffff !important; page-break-inside: avoid; border-radius: 8px; }
+      .test-header { background: #f9fafb !important; border-bottom: 1px solid #d1d5db !important; padding: 14px 18px !important; }
+      .test-title { color: #111827 !important; font-size: 15px !important; }
+      .section-title { color: #1351b4 !important; font-size: 11px !important; }
+      .description-box { background: #f9fafb !important; color: #374151 !important; border: 1px solid #d1d5db !important; padding: 12px !important; }
+      .code-box { background: #f3f4f6 !important; color: #1f2937 !important; border: 1px solid #d1d5db !important; page-break-inside: avoid; }
       
-      .step-item { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; page-break-inside: avoid; }
-      .step-label { color: #0f172a !important; }
-      .step-detail { color: #475569 !important; }
+      .step-item { background: #f9fafb !important; border: 1px solid #d1d5db !important; page-break-inside: avoid; }
+      .step-label { color: #111827 !important; }
+      .step-detail { color: #4b5563 !important; }
       
-      .evidence-preview-wrapper { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; max-height: 350px !important; page-break-inside: avoid; }
-      .evidence-img { max-height: 350px !important; }
+      .evidence-preview-wrapper { background: #f9fafb !important; border: 1px solid #d1d5db !important; max-height: 320px !important; page-break-inside: avoid; }
+      .evidence-img { max-height: 320px !important; }
       .img-overlay { display: none !important; }
-      .evidence-audit-badge { background: #f8fafc !important; border: 1px solid #cbd5e1 !important; color: #0f172a !important; }
-      .audit-title { color: #0f172a !important; }
-      .audit-desc { color: #475569 !important; }
+      .evidence-audit-badge { background: #f9fafb !important; border: 1px solid #d1d5db !important; color: #111827 !important; }
+      .audit-title { color: #111827 !important; }
+      .audit-desc { color: #4b5563 !important; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Interactive Controls Bar -->
+  <!-- Top Controls Bar -->
   <div class="top-toolbar">
     <div class="toolbar-left">
-      <div class="brand-tag">⚡ <span>Planner QA Studio</span> &bull; Relatório Profissional</div>
+      <div class="brand-tag">⚡ <span>Planner QA Studio</span> &bull; Relatório Executivo</div>
     </div>
     <div class="toolbar-actions">
-      <button class="btn" onclick="window.toggleTheme()" id="themeBtn">🌓 Tema Claro/Escuro</button>
-      <button class="btn" onclick="window.toggleEdit()" id="editBtn">✏️ Modo Edição</button>
-      <button class="btn btn-success" onclick="window.downloadEditedHtml()" id="downloadHtmlBtn">💾 Baixar HTML com Edições</button>
-      <button class="btn btn-primary" onclick="window.print()" id="printBtn">🖨️ Exportar PDF / Imprimir</button>
+      <button class="btn" id="themeBtn" title="Alternar entre tema claro e escuro">🌓 Tema Claro/Escuro</button>
+      <button class="btn" id="editBtn" title="Permite editar os textos e títulos diretamente na página">✏️ Modo Edição</button>
+      <button class="btn btn-success" id="downloadHtmlBtn" title="Baixa este relatório em HTML com todas as fotos e alterações salvas">💾 Baixar HTML com Edições</button>
+      <button class="btn btn-primary" id="printBtn" title="Imprime ou salva em formato PDF executivo">🖨️ Exportar PDF / Imprimir</button>
     </div>
   </div>
 
@@ -795,7 +820,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     <div class="executive-cover">
       <div class="cover-chip">📋 Relatório Executivo Consolidado de QA</div>
       <h1 class="cover-heading" contenteditable="true">Relatório de Testes & Evidências de Qualidade</h1>
-      <p class="cover-subheading" contenteditable="true">Consolidação detalhada com evidências fotográficas, steps de automação, planos de teste e diagnóstico de qualidade.</p>
+      <p class="cover-subheading" contenteditable="true">Consolidação oficial com evidências fotográficas, roteiros de automação, planos de teste estruturados e diagnóstico de qualidade.</p>
       
       <!-- Metrics KPI Grid -->
       <div class="kpi-grid">
@@ -850,12 +875,12 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     <!-- Interactive Filters -->
     <div class="filter-section">
       <div class="filter-pills">
-        <button class="pill-btn active" onclick="window.filterStatus('all', this)">Todos (${totalCount})</button>
-        <button class="pill-btn" onclick="window.filterStatus('done', this)">Concluídos (${doneCount})</button>
-        <button class="pill-btn" onclick="window.filterStatus('in_progress', this)">Em Progresso (${inProgressCount})</button>
-        <button class="pill-btn" onclick="window.filterStatus('todo', this)">A Fazer (${todoCount})</button>
+        <button class="pill-btn active" data-filter="all">Todos (${totalCount})</button>
+        <button class="pill-btn" data-filter="done">Concluídos (${doneCount})</button>
+        <button class="pill-btn" data-filter="in_progress">Em Progresso (${inProgressCount})</button>
+        <button class="pill-btn" data-filter="todo">A Fazer (${todoCount})</button>
       </div>
-      <input type="text" class="search-input" placeholder="🔍 Filtrar testes pelo título..." oninput="window.searchTests(this.value)" />
+      <input type="text" class="search-input" id="searchInput" placeholder="🔍 Filtrar testes pelo título..." />
     </div>
 
     <!-- Detailed Test Cards List -->
@@ -863,314 +888,275 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
       ${tasksCardsHtml}
     </div>
 
-    <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:60px;padding-top:20px;border-top:1px solid var(--card-border);">
+    <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:50px;padding-top:20px;border-top:1px solid var(--card-border);">
       Relatório emitido pelo <strong>Planner QA Studio</strong> &bull; Documento Oficial de Qualidade &bull; ${now}
     </div>
   </div>
 
-  <!-- Lightbox Modal -->
-  <div class="lightbox-modal" id="lightboxModal" onclick="window.closeLightbox()">
-    <button class="lightbox-close" onclick="window.closeLightbox()">&times;</button>
-    <img src="" alt="Zoom" class="lightbox-img" id="lightboxImg" onclick="event.stopPropagation()" />
+  <!-- Lightbox Modal (Zoom Fullscreen) -->
+  <div class="lightbox-modal" id="lightboxModal">
+    <button class="lightbox-close" id="lightboxCloseBtn" title="Fechar">&times;</button>
+    <img src="" alt="Zoom Evidência" class="lightbox-img" id="lightboxImg" />
     <div class="lightbox-caption" id="lightboxCaption"></div>
   </div>
 
   <script>
-    // 1. Lightbox Functionality (Exposto em window)
-    window.openLightboxFromEl = function(el, customCaption) {
-      if (!el) return;
-      const img = el.querySelector('img');
-      if (!img || !img.src) return;
-      let caption = customCaption || '';
-      if (!caption) {
-        const step = el.closest('.step-item');
-        const card = el.closest('.test-card');
-        if (step) {
-          const badge = step.querySelector('.step-badge');
-          const label = step.querySelector('.step-label');
-          caption = 'Passo ' + (badge ? badge.innerText : '') + ': ' + (label ? label.innerText : '');
-        } else if (card) {
-          const title = card.querySelector('.test-title');
-          caption = title ? title.innerText : 'Evidência do Teste';
+    (function() {
+      // 1. Alternador de Tema
+      function toggleTheme() {
+        var html = document.documentElement;
+        var current = html.getAttribute('data-theme') || 'dark';
+        var next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        var btn = document.getElementById('themeBtn');
+        if (btn) {
+          btn.innerText = next === 'dark' ? '🌓 Tema Claro' : '🌓 Tema Escuro';
         }
       }
-      window.openLightbox(img.src, caption);
-    };
 
-    window.openLightbox = function(src, caption) {
-      const modal = document.getElementById('lightboxModal');
-      const img = document.getElementById('lightboxImg');
-      const cap = document.getElementById('lightboxCaption');
-      if (modal && img) {
-        img.src = src;
-        if (cap) cap.innerText = caption || '';
-        modal.classList.add('active');
-      }
-    };
-
-    window.closeLightbox = function() {
-      const modal = document.getElementById('lightboxModal');
-      if (modal) modal.classList.remove('active');
-    };
-
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') window.closeLightbox();
-    });
-
-    // 2. Image Upload & Replacement Engine
-    window.triggerImageUpload = function(sectionEl) {
-      if (!sectionEl) return;
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.onchange = function(e) {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function() {
-          window.setSectionImage(sectionEl, reader.result);
-        };
-        reader.readAsDataURL(file);
-      };
-      input.click();
-    };
-
-    window.setSectionImage = function(sectionEl, dataUrl) {
-      if (!sectionEl) return;
-      const existingWrapper = sectionEl.querySelector('.evidence-preview-wrapper');
-      const existingBadge = sectionEl.querySelector('.evidence-audit-badge');
-      if (existingWrapper) {
-        const img = existingWrapper.querySelector('img');
-        if (img) img.src = dataUrl;
-      } else {
-        const titleEl = sectionEl.closest('.test-card') ? sectionEl.closest('.test-card').querySelector('.test-title') : null;
-        const cardTitle = titleEl ? titleEl.innerText : 'Evidência';
-        const newWrapper = document.createElement('div');
-        newWrapper.className = 'evidence-preview-wrapper';
-        newWrapper.onclick = function() { window.openLightboxFromEl(this, 'Evidência do Teste: ' + cardTitle); };
-        newWrapper.innerHTML = 
-          '<img src="' + dataUrl + '" alt="Evidência" class="evidence-img" />' +
-          '<div class="img-overlay"><span>🔍 Clique para zoom &bull; Pressione Ctrl+V para trocar</span></div>' +
-          '<div class="img-action-bar" onclick="event.stopPropagation()">' +
-            '<button class="img-action-pill" onclick="window.triggerImageUpload(this.closest(\'.evidence-section\'))" title="Trocar imagem">📷 Trocar</button>' +
-            '<button class="img-action-pill danger" onclick="window.removeCardImage(this)" title="Remover imagem">🗑️ Remover</button>' +
-          '</div>';
-        if (existingBadge) {
-          existingBadge.replaceWith(newWrapper);
-        } else {
-          sectionEl.appendChild(newWrapper);
+      // 2. Modo Edição
+      var isEditing = true;
+      function toggleEdit() {
+        isEditing = !isEditing;
+        var elements = document.querySelectorAll('[contenteditable]');
+        for (var i = 0; i < elements.length; i++) {
+          elements[i].contentEditable = isEditing ? 'true' : 'false';
+        }
+        var btn = document.getElementById('editBtn');
+        if (btn) {
+          btn.innerText = isEditing ? '✏️ Modo Edição (Ativo)' : '🔒 Modo Leitura';
+          btn.style.background = isEditing ? 'rgba(19, 81, 180, 0.25)' : 'rgba(255,255,255,0.08)';
         }
       }
-    };
 
-    window.removeCardImage = function(btnEl) {
-      const section = btnEl.closest('.evidence-section');
-      const wrapper = btnEl.closest('.evidence-preview-wrapper');
-      if (!section || !wrapper) return;
-      wrapper.remove();
-    };
+      // 3. Filtro por Status
+      function filterStatus(status, clickedBtn) {
+        var pills = document.querySelectorAll('.pill-btn');
+        for (var i = 0; i < pills.length; i++) pills[i].classList.remove('active');
+        if (clickedBtn) clickedBtn.classList.add('active');
 
-    // 3. Step Image Actions
-    window.triggerStepImageUpload = function(el) {
-      const stepItem = el.closest('.step-item');
-      if (!stepItem) return;
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.onchange = function(e) {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function() {
-          window.setStepImage(stepItem, reader.result);
-        };
-        reader.readAsDataURL(file);
-      };
-      input.click();
-    };
-
-    window.setStepImage = function(stepItem, dataUrl) {
-      if (!stepItem) return;
-      const container = stepItem.querySelector('.step-img-container') || stepItem;
-      const labelEl = stepItem.querySelector('.step-label');
-      const label = labelEl ? labelEl.innerText : 'Passo';
-      container.innerHTML = 
-        '<div class="step-img-box" onclick="window.openLightboxFromEl(this, \'' + label.replace(/'/g, "\\'") + '\')">' +
-          '<img src="' + dataUrl + '" alt="' + label.replace(/"/g, '&quot;') + '" />' +
-          '<span class="zoom-tag">🔍 Zoom</span>' +
-          '<div class="step-img-actions" onclick="event.stopPropagation()">' +
-            '<button onclick="window.triggerStepImageUpload(this)" title="Trocar imagem">📷</button>' +
-            '<button class="danger" onclick="window.removeStepImage(this)" title="Remover imagem">🗑️</button>' +
-          '</div>' +
-        '</div>';
-    };
-
-    window.removeStepImage = function(btnEl) {
-      const stepItem = btnEl.closest('.step-item');
-      const container = btnEl.closest('.step-img-container');
-      if (!stepItem || !container) return;
-      container.innerHTML = 
-        '<div class="step-img-empty" onclick="window.triggerStepImageUpload(this)">' +
-          '<span>➕ Anexar print (ou Ctrl+V)</span>' +
-        '</div>';
-    };
-
-    window.handleStepPaste = function(e, stepItemEl) {
-      const items = e.clipboardData ? e.clipboardData.items : null;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const file = items[i].getAsFile();
-          if (file) {
-            e.preventDefault();
-            e.stopPropagation();
-            const reader = new FileReader();
-            reader.onload = function() { window.setStepImage(stepItemEl, reader.result); };
-            reader.readAsDataURL(file);
-            break;
+        var cards = document.querySelectorAll('.test-card');
+        for (var j = 0; j < cards.length; j++) {
+          var card = cards[j];
+          if (status === 'all' || card.getAttribute('data-status') === status) {
+            card.style.display = 'block';
+          } else {
+            card.style.display = 'none';
           }
         }
       }
-    };
 
-    // 4. Global Paste (Ctrl+V) handler
-    document.addEventListener('paste', function(e) {
-      const items = e.clipboardData ? e.clipboardData.items : null;
-      if (!items) return;
-      let imageFile = null;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          imageFile = items[i].getAsFile();
-          break;
+      // 4. Busca por Texto
+      function searchTests(query) {
+        var q = (query || '').toLowerCase();
+        var cards = document.querySelectorAll('.test-card');
+        for (var i = 0; i < cards.length; i++) {
+          var card = cards[i];
+          var text = card.innerText.toLowerCase();
+          card.style.display = text.indexOf(q) !== -1 ? 'block' : 'none';
         }
       }
-      if (!imageFile) return;
 
-      const activeEl = document.activeElement;
-      const targetCard = activeEl ? activeEl.closest('.test-card') : (document.querySelector('.test-card:hover') || document.querySelector('.test-card'));
-      if (targetCard) {
-        const evidenceSection = targetCard.querySelector('.evidence-section');
-        if (evidenceSection) {
-          e.preventDefault();
-          const reader = new FileReader();
-          reader.onload = function() { window.setSectionImage(evidenceSection, reader.result); };
-          reader.readAsDataURL(imageFile);
+      // 5. Download HTML com Edições
+      function downloadEditedHtml() {
+        var fullHtml = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+        var blob = new Blob([fullHtml], { type: 'text/html; charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'relatorio-qa-evidencias-' + new Date().toISOString().slice(0, 10) + '.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
+      }
+
+      // 6. Imprimir / Salvar PDF
+      function printReport() {
+        window.print();
+      }
+
+      // 7. Lightbox Zoom
+      function openLightbox(src, caption) {
+        var modal = document.getElementById('lightboxModal');
+        var img = document.getElementById('lightboxImg');
+        var cap = document.getElementById('lightboxCaption');
+        if (modal && img) {
+          img.src = src;
+          if (cap) cap.innerText = caption || '';
+          modal.classList.add('active');
         }
       }
-    });
 
-    // 5. Theme Switcher
-    window.toggleTheme = function() {
-      const html = document.documentElement;
-      const current = html.getAttribute('data-theme') || 'dark';
-      const next = current === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', next);
-      const btn = document.getElementById('themeBtn');
-      if (btn) {
-        btn.innerText = next === 'dark' ? '🌓 Tema Claro' : '🌓 Tema Escuro';
+      function closeLightbox() {
+        var modal = document.getElementById('lightboxModal');
+        if (modal) modal.classList.remove('active');
       }
-    };
 
-    // 6. Editable Mode Toggle
-    let isEditing = true;
-    window.toggleEdit = function() {
-      isEditing = !isEditing;
-      document.querySelectorAll('[contenteditable]').forEach(function(el) {
-        el.contentEditable = isEditing ? 'true' : 'false';
-      });
-      const btn = document.getElementById('editBtn');
-      if (btn) {
-        btn.innerText = isEditing ? '✏️ Modo Edição (Ativo)' : '🔒 Modo Leitura';
-        btn.style.background = isEditing ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.05)';
+      // 8. Upload de Imagem Dinâmico
+      function triggerImageUpload(sectionEl) {
+        if (!sectionEl) return;
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = function(e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function() {
+            setSectionImage(sectionEl, reader.result);
+          };
+          reader.readAsDataURL(file);
+        };
+        input.click();
       }
-    };
 
-    // 7. Filter Tests by Status
-    window.filterStatus = function(status, clickedBtn) {
-      document.querySelectorAll('.pill-btn').forEach(function(b) { b.classList.remove('active'); });
-      if (clickedBtn) {
-        clickedBtn.classList.add('active');
-      } else {
-        const matchingBtn = Array.from(document.querySelectorAll('.pill-btn')).find(function(b) {
-          return b.getAttribute('onclick') && b.getAttribute('onclick').includes(status);
-        });
-        if (matchingBtn) matchingBtn.classList.add('active');
-      }
-      document.querySelectorAll('.test-card').forEach(function(card) {
-        if (status === 'all' || card.getAttribute('data-status') === status) {
-          card.style.display = 'block';
+      function setSectionImage(sectionEl, dataUrl) {
+        if (!sectionEl) return;
+        var existingWrapper = sectionEl.querySelector('.evidence-preview-wrapper');
+        var existingBadge = sectionEl.querySelector('.evidence-audit-badge');
+        if (existingWrapper) {
+          var img = existingWrapper.querySelector('img');
+          if (img) img.src = dataUrl;
         } else {
-          card.style.display = 'none';
+          var titleEl = sectionEl.closest('.test-card') ? sectionEl.closest('.test-card').querySelector('.test-title') : null;
+          var cardTitle = titleEl ? titleEl.innerText : 'Evidência';
+          var newWrapper = document.createElement('div');
+          newWrapper.className = 'evidence-preview-wrapper';
+          newWrapper.innerHTML = 
+            '<img src="' + dataUrl + '" alt="Evidência" class="evidence-img" />' +
+            '<div class="img-overlay"><span>🔍 Clique para zoom</span></div>' +
+            '<div class="img-action-bar" onclick="event.stopPropagation()">' +
+              '<button class="img-action-pill add-btn" title="Trocar imagem">📷 Trocar</button>' +
+              '<button class="img-action-pill danger rm-btn" title="Remover imagem">🗑️ Remover</button>' +
+            '</div>';
+          if (existingBadge) {
+            existingBadge.replaceWith(newWrapper);
+          } else {
+            sectionEl.appendChild(newWrapper);
+          }
+        }
+      }
+
+      // 9. Listener Global de Cliques (Delegação Total Infalível)
+      document.addEventListener('click', function(e) {
+        var target = e.target;
+
+        // Botão Tema
+        if (target.closest('#themeBtn')) {
+          e.preventDefault();
+          toggleTheme();
+          return;
+        }
+
+        // Botão Modo Edição
+        if (target.closest('#editBtn')) {
+          e.preventDefault();
+          toggleEdit();
+          return;
+        }
+
+        // Botão Download HTML
+        if (target.closest('#downloadHtmlBtn')) {
+          e.preventDefault();
+          downloadEditedHtml();
+          return;
+        }
+
+        // Botão Imprimir / PDF
+        if (target.closest('#printBtn')) {
+          e.preventDefault();
+          printReport();
+          return;
+        }
+
+        // Filtro de Status
+        var pill = target.closest('.pill-btn');
+        if (pill) {
+          e.preventDefault();
+          var filter = pill.getAttribute('data-filter') || 'all';
+          filterStatus(filter, pill);
+          return;
+        }
+
+        // Trocar imagem
+        if (target.closest('.add-btn') || target.closest('.step-img-empty')) {
+          e.preventDefault();
+          e.stopPropagation();
+          var section = target.closest('.evidence-section') || target.closest('.step-item');
+          triggerImageUpload(section);
+          return;
+        }
+
+        // Remover imagem
+        if (target.closest('.rm-btn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          var wrapper = target.closest('.evidence-preview-wrapper') || target.closest('.step-img-box');
+          if (wrapper) wrapper.remove();
+          return;
+        }
+
+        // Fechar Lightbox
+        if (target.closest('#lightboxCloseBtn') || target.id === 'lightboxModal') {
+          e.preventDefault();
+          closeLightbox();
+          return;
+        }
+
+        // Zoom na Imagem (Qualquer clique em foto de teste, container ou overlay)
+        var zoomBox = target.closest('.evidence-preview-wrapper, .step-img-box, .evidence-img');
+        if (zoomBox && !target.closest('.img-action-bar, .step-img-actions')) {
+          e.preventDefault();
+          e.stopPropagation();
+          var imgEl = zoomBox.tagName === 'IMG' ? zoomBox : zoomBox.querySelector('img');
+          if (imgEl && imgEl.src) {
+            var cardEl = zoomBox.closest('.test-card');
+            var captionTitle = cardEl ? (cardEl.querySelector('.test-title') ? cardEl.querySelector('.test-title').innerText : 'Evidência') : 'Evidência de Teste';
+            openLightbox(imgEl.src, captionTitle);
+          }
+          return;
         }
       });
-    };
 
-    // 8. Search Filter
-    window.searchTests = function(query) {
-      const q = (query || '').toLowerCase();
-      document.querySelectorAll('.test-card').forEach(function(card) {
-        const text = card.innerText.toLowerCase();
-        card.style.display = text.includes(q) ? 'block' : 'none';
+      // Busca ao digitar
+      var searchEl = document.getElementById('searchInput');
+      if (searchEl) {
+        searchEl.addEventListener('input', function() {
+          searchTests(this.value);
+        });
+      }
+
+      // Fechar com ESC
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeLightbox();
       });
-    };
 
-    // 9. Download Modified HTML
-    window.downloadEditedHtml = function() {
-      const fullHtml = '<!DOCTYPE html>' + document.documentElement.outerHTML;
-      const blob = new Blob([fullHtml], { type: 'text/html; charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'relatorio-qa-evidencias-' + new Date().toISOString().slice(0, 10) + '.html';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
-    };
-
-    // 10. Initializer
-    function setupReportEvents() {
-      const tBtn = document.getElementById('themeBtn');
-      if (tBtn) tBtn.onclick = window.toggleTheme;
-      const eBtn = document.getElementById('editBtn');
-      if (eBtn) eBtn.onclick = window.toggleEdit;
-      const dBtn = document.getElementById('downloadHtmlBtn');
-      if (dBtn) dBtn.onclick = window.downloadEditedHtml;
-      const pBtn = document.getElementById('printBtn');
-      if (pBtn) pBtn.onclick = function() { window.print(); };
-    }
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', setupReportEvents);
-    } else {
-      setupReportEvents();
-    }
+      // Exporta funções globalmente
+      window.toggleTheme = toggleTheme;
+      window.toggleEdit = toggleEdit;
+      window.downloadEditedHtml = downloadEditedHtml;
+      window.printReport = printReport;
+      window.openLightbox = openLightbox;
+      window.closeLightbox = closeLightbox;
+    })();
   </script>
 </body>
 </html>`;
 
-      // Cria a nova janela e injeta o documento diretamente
-      const newWin = window.open('', '_blank');
-      if (newWin) {
-        newWin.document.open();
-        newWin.document.write(htmlContent);
-        newWin.document.close();
-      } else {
-        const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-      }
-
-      // Também baixa o arquivo HTML como backup
+      // Cria Blob e abre a visualização
       const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const fileName = `relatorio-qa-completo-${new Date().toISOString().slice(0, 10)}.html`;
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const blobUrl = URL.createObjectURL(blob);
+      const newWin = window.open(blobUrl, '_blank');
+      
+      if (!newWin) {
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
     } catch (err: any) {
       alert('Erro ao gerar relatório HTML: ' + (err.message || err));
     } finally {
@@ -1299,15 +1285,6 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     setSelectedTasks(new Set());
   };
 
-  const filteredTasks =
-    filterStatus === "all"
-      ? tasks
-      : tasks.filter((t) => t.status === filterStatus);
-
-  const sortedParentTasks = filteredTasks
-    .filter((t) => !t.parent_task_id)
-    .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
-
   const toggleTaskSelection = (taskId: string) => {
     const newSet = new Set(selectedTasks);
     if (newSet.has(taskId)) newSet.delete(taskId);
@@ -1411,24 +1388,33 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     if (!newTitle.trim()) return;
 
     setAdding(true);
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("tasks")
-      .insert({
-        project_id: projectId,
-        title: newTitle.trim(),
-        status: "todo",
-        priority: "medium",
-      })
-      .select()
-      .single();
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert({
+          project_id: projectId,
+          title: newTitle.trim(),
+          status: "todo",
+          priority: "medium",
+        })
+        .select()
+        .single();
 
-    if (data) {
-      onTasksChange([data as Task, ...tasks]);
-      setNewTitle("");
-      setShowForm(false);
+      if (error) {
+        console.error("Erro ao criar tarefa no Supabase:", error);
+        alert("Erro ao criar tarefa: " + error.message);
+      } else if (data) {
+        onTasksChange([data as Task, ...tasks]);
+        setNewTitle("");
+        setShowForm(false);
+      }
+    } catch (err: any) {
+      console.error("Erro inesperado ao criar tarefa:", err);
+      alert("Erro ao criar tarefa: " + (err.message || "Erro de conexão"));
+    } finally {
+      setAdding(false);
     }
-    setAdding(false);
   };
 
   const cycleStatus = async (task: Task) => {
@@ -1775,7 +1761,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                       >
                         {task.title}
                       </p>
-                      {task.metadata?.automationCode && (
+                      {Boolean(task.metadata?.automationCode) && (
                         <span
                           className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 w-fit"
                           title="Passos de automação já gerados"
@@ -1901,7 +1887,7 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
                               )}>
                                 {subtask.title}
                               </p>
-                              {subtask.metadata?.automationCode && (
+                              {Boolean(subtask.metadata?.automationCode) && (
                                 <span
                                   className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 w-fit"
                                   title="Passos de automação já gerados"
@@ -1951,13 +1937,31 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
         </AnimatePresence>
 
         {filteredTasks.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <CheckSquare className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">
+          <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 text-primary">
+              <CheckSquare className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-semibold text-foreground mb-1">
               {filterStatus === "all"
-                ? "Nenhuma tarefa ainda"
+                ? "Nenhuma tarefa criada neste projeto"
                 : `Nenhuma tarefa ${statusLabel[filterStatus].toLowerCase()}`}
+            </h3>
+            <p className="text-xs text-muted-foreground max-w-sm mb-6">
+              {filterStatus === "all"
+                ? "Você pode criar tarefas manualmente, sugerir com IA ou importar casos de teste da aba 'Casos de Teste'."
+                : "Altere o filtro acima para 'Todas' para ver as demais tarefas."}
             </p>
+            {filterStatus === "all" && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-semibold hover:bg-primary/90 transition-all shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Criar primeira tarefa
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, FolderKanban, Network, ArrowLeft, ArrowRight } from "lucide-react";
 import { ProjectCard } from "@/components/dashboard/ProjectCard";
@@ -117,18 +118,16 @@ export function ParentProjectClient({ project, subProjects, currentUserId }: Par
                     return (
                       <tr 
                         key={sub.id}
-                        className="group transition-colors hover:bg-accent/50"
+                        onClick={() => router.push(`/projects/${sub.id}`)}
+                        className="group transition-colors hover:bg-accent/50 cursor-pointer"
                       >
                         <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
-                          <div 
-                            onClick={() => router.push(`/projects/${sub.id}`)} 
-                            className="flex items-center gap-3 cursor-pointer"
-                          >
+                          <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${sub.color}20` }}>
                               <span className="text-sm">{sub.emoji ?? "📁"}</span>
                             </div>
                             <div className="flex flex-col min-w-0">
-                              <span className="font-medium text-foreground truncate">{sub.title}</span>
+                              <span className="font-medium text-foreground group-hover:text-primary transition-colors truncate">{sub.title}</span>
                               {sub.description && (
                                 <span className="text-xs text-muted-foreground truncate">{sub.description}</span>
                               )}
@@ -165,8 +164,13 @@ export function ParentProjectClient({ project, subProjects, currentUserId }: Par
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button 
-                            onClick={() => router.push(`/projects/${sub.id}`)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border transition-all"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/projects/${sub.id}`);
+                            }}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 border border-transparent group-hover:border-primary/20 transition-all"
+                            title="Abrir Subprojeto"
                           >
                             <ArrowRight className="w-4 h-4" />
                           </button>

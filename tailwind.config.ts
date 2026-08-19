@@ -10,12 +10,21 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
-        outfit: ["var(--font-outfit)", "Outfit", "system-ui", "sans-serif"],
+        sans: ["var(--font-jakarta)", "var(--font-inter)", "system-ui", "-apple-system", "sans-serif"],
+        heading: ["var(--font-jakarta)", "sans-serif"],
+        jakarta: ["var(--font-jakarta)", "sans-serif"],
+        inter: ["var(--font-inter)", "sans-serif"],
+        outfit: ["var(--font-jakarta)", "sans-serif"],
+        raleway: ["var(--font-jakarta)", "sans-serif"],
       },
       colors: {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        // 'surface' is used extensively throughout the app as a card/panel background
+        surface: {
+          DEFAULT: "hsl(var(--card))",
+          hover: "hsl(var(--accent))",
+        },
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",

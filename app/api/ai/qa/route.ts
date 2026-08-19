@@ -499,16 +499,25 @@ export async function POST(req: Request) {
       }
       // -----------------------------------------------------------
 
-      const sys = "Você é um Engenheiro de QA Sênior especialista em testes end-to-end.\n"
-        + "Sua tarefa é analisar os cenários gravados e gerar uma suíte de casos de teste REAIS E PROFISSIONAIS em formato JSON.\n"
-        + "REGRA CRÍTICA: FILTRE e IGNORE cenários inúteis, repetitivos ou sem sentido, como 'clicar num link e permanecer na mesma página' ou 'fechar aba sem contexto'. Crie casos de teste APENAS para fluxos funcionais reais, lógicos e que tenham valor de negócio.\n"
-        + "Os títulos devem ser profissionais, diretos e focados na ação (ex: 'Validar redirecionamento para X', 'Testar preenchimento de Y'). NUNCA use reticências '...'\n"
-        + "Retorne APENAS JSON válido no formato:\n"
-        + '{"test_cases": [{"id": "TC001", "title": "título descritivo completo do teste", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "...", "priority": "alta|media|baixa"}]}';
+      const sys = `Você é um Engenheiro de QA Sênior e Especialista em Testes de Software.
+Sua tarefa é analisar os requisitos e gerar uma SUÍTE COMPLETA, DETALHADA E EXAUSTIVA de casos de teste em formato JSON.
 
-      const usr = `Analise os cenários abaixo e crie casos de teste APENAS para os fluxos que fazem sentido e têm relevância (filtre o lixo).\n\n`
+DIRETRIZES OBRIGATÓRIAS:
+1. GERE UMA QUANTIDADE GENEROSA E ABRANGENTE de casos de teste (entre 8 a 15 casos de teste profissionais).
+2. A suíte DEVE cobrir:
+   - Caminhos Felizes (happy_path): Fluxos principais de sucesso e valor de negócio.
+   - Casos de Erro e Validação (error): Validação de campos obrigatórios, tipos de dados inválidos, mensagens de alerta.
+   - Casos de Borda (edge_case): Limites de caracteres, valores extremos, cliques duplos, caracteres especiais e segurança básica.
+3. Para cada caso de teste, inclua passos detalhados (steps) de execução sequencial e um resultado esperado (expected_result) claro e verificável.
+4. Categorias válidas: "happy_path", "error", "edge_case".
+5. Prioridades válidas: "alta", "media", "baixa".
+
+Retorne APENAS um JSON válido no formato:
+{"test_cases": [{"id": "TC001", "title": "título descritivo completo", "category": "happy_path|error|edge_case", "steps": ["passo 1", "passo 2"], "expected_result": "resultado esperado claro", "priority": "alta|media|baixa"}]}`;
+
+      const usr = `Analise os requisitos e especificações abaixo e crie uma suíte COMPLETA E EXAUSTIVA de casos de teste (mínimo de 8 a 15 casos cobrindo happy path, erros e casos de borda):\n\n`
         + processedInput + htmlContext
-        + "\n\nRetorne apenas o JSON com os casos de teste selecionados.";
+        + "\n\nRetorne apenas o JSON no formato solicitado.";
 
       result = await callOpenRouter(
         [{ role: "system", content: sys }, { role: "user", content: usr }],

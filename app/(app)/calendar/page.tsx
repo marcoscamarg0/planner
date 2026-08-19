@@ -18,10 +18,10 @@ export default async function CalendarPage({
   const resolvedSearchParams = await searchParams;
   const targetDate = resolvedSearchParams.month ? new Date(resolvedSearchParams.month) : new Date();
   
-  // Get all tasks with a due date
+  // Get tasks with a due date (lean column selection)
   const { data: tasks } = await supabase
     .from("tasks")
-    .select(`*, projects(id, title, color)`)
+    .select("id, title, status, due_date, project_id, projects(id, title, color)")
     .not("due_date", "is", null)
     .order("due_date", { ascending: true });
 
@@ -41,6 +41,12 @@ export default async function CalendarPage({
 
   const nextMonth = format(addMonths(monthStart, 1), 'yyyy-MM-dd');
   const prevMonth = format(subMonths(monthStart, 1), 'yyyy-MM-dd');
+
+  const getProjectInfo = (projectsField: any) => {
+    if (!projectsField) return null;
+    if (Array.isArray(projectsField)) return projectsField[0] || null;
+    return projectsField;
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8 animate-fade-in">
@@ -99,19 +105,22 @@ export default async function CalendarPage({
                 </div>
                 
                 <div className="space-y-1.5 overflow-y-auto max-h-[80px] custom-scrollbar">
-                  {dayTasks.map(task => (
-                    <div 
-                      key={task.id} 
-                      className={`text-xs p-1.5 rounded-md flex items-center gap-1.5 truncate ${task.status === 'done' ? 'opacity-50 line-through' : ''}`}
-                      style={{ 
-                        backgroundColor: `${task.projects?.color}15`,
-                        color: task.projects?.color || 'currentColor',
-                        borderLeft: `2px solid ${task.projects?.color || '#fff'}`
-                      }}
-                    >
-                      {task.title}
-                    </div>
-                  ))}
+                  {dayTasks.map(task => {
+                    const proj = getProjectInfo(task.projects);
+                    return (
+                      <div 
+                        key={task.id} 
+                        className={`text-xs p-1.5 rounded-md flex items-center gap-1.5 truncate ${task.status === 'done' ? 'opacity-50 line-through' : ''}`}
+                        style={{ 
+                          backgroundColor: `${proj?.color || '#3b82f6'}15`,
+                          color: proj?.color || 'currentColor',
+                          borderLeft: `2px solid ${proj?.color || '#3b82f6'}`
+                        }}
+                      >
+                        {task.title}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -126,27 +135,30 @@ export default async function CalendarPage({
           Próximos Prazos (Visão em Lista)
         </h3>
         <div className="glass rounded-xl divide-y divide-border/50">
-          {tasksList.filter(t => new Date(t.due_date) >= new Date()).slice(0, 10).map(task => (
-            <div key={task.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
-              <div className="flex items-center gap-3">
-                {task.status === 'done' ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Circle className="w-5 h-5 text-muted-foreground" />}
-                <div>
-                  <p className={`text-sm font-semibold ${task.status === 'done' ? 'line-through opacity-50' : 'text-foreground'}`}>
-                    {task.title}
-                  </p>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: task.projects?.color }} />
-                    {task.projects?.title}
-                  </p>
+          {tasksList.filter(t => t.due_date && new Date(t.due_date) >= new Date()).slice(0, 10).map(task => {
+            const proj = getProjectInfo(task.projects);
+            return (
+              <div key={task.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
+                <div className="flex items-center gap-3">
+                  {task.status === 'done' ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Circle className="w-5 h-5 text-muted-foreground" />}
+                  <div>
+                    <p className={`text-sm font-semibold ${task.status === 'done' ? 'line-through opacity-50' : 'text-foreground'}`}>
+                      {task.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: proj?.color || '#3b82f6' }} />
+                      {proj?.title || 'Sem projeto'}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className={`text-sm font-bold ${task.due_date && isSameDay(parseISO(task.due_date), new Date()) ? 'text-rose-400' : 'text-muted-foreground'}`}>
+                    {task.due_date ? format(parseISO(task.due_date), "dd 'de' MMM", { locale: ptBR }) : ''}
+                  </span>
                 </div>
               </div>
-              <div className="text-right">
-                <span className={`text-sm font-bold ${isSameDay(parseISO(task.due_date), new Date()) ? 'text-rose-400' : 'text-muted-foreground'}`}>
-                  {format(parseISO(task.due_date), "dd 'de' MMM", { locale: ptBR })}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           
           {tasksList.filter(t => new Date(t.due_date) >= new Date()).length === 0 && (
             <div className="p-8 text-center text-muted-foreground text-sm">

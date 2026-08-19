@@ -89,8 +89,7 @@ export function MagicAddModal({ open, onClose, projects = [] }: MagicAddModalPro
 
   const goToProject = () => {
     if (result?.projectId) {
-      router.push(`/projects/${result.projectId}`);
-      router.refresh();
+      window.open(`/projects/${result.projectId}`, "_blank");
     }
     handleClose();
   };

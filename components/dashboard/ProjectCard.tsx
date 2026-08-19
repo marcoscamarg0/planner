@@ -78,7 +78,12 @@ export function ProjectCard({ project, subProjects = [], index = 0, currentUserI
           />
         </div>
       )}
-      <Link href={`/projects/${project.id}`} className={cn("block space-y-4", onToggleSelect && "pl-6")}>
+      <Link
+        href={`/projects/${project.id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn("block space-y-4", onToggleSelect && "pl-6")}
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             <div
@@ -94,17 +99,17 @@ export function ProjectCard({ project, subProjects = [], index = 0, currentUserI
               </h2>
               <span
                 className={cn(
-                  "text-xs font-medium px-2 py-0.5 rounded-full shrink-0",
-                  project.status === "active" && "bg-emerald-500/15 text-emerald-400",
-                  project.status === "paused" && "bg-amber-500/15 text-amber-400",
-                  project.status === "completed" && "bg-primary/15 text-primary",
-                  project.status === "archived" && "bg-muted text-muted-foreground"
+                  "text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 border",
+                  project.status === "active" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+                  project.status === "paused" && "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
+                  project.status === "completed" && "bg-primary/10 text-primary border-primary/20",
+                  project.status === "archived" && "bg-muted text-muted-foreground border-border"
                 )}
               >
                 {getStatusLabel(project.status)}
               </span>
               {currentUserId && currentUserId !== project.owner_id && (
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0 bg-blue-500/15 text-blue-400">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20">
                   Compartilhado
                 </span>
               )}
@@ -259,6 +264,8 @@ export function ProjectCard({ project, subProjects = [], index = 0, currentUserI
               <Link 
                 key={sp.id} 
                 href={`/projects/${sp.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="flex items-center gap-2 p-2 rounded-lg hover:bg-accent/50 transition-colors border border-transparent hover:border-border"
               >
                 <div 

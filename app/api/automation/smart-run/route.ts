@@ -739,7 +739,7 @@ async function runStep(page: any, step: SmartStep, index: number, baseUrl: strin
 
     if (!locator) {
       // Se for uma verificação (wait / verify), não falha por não achar botão
-      if (step.action === 'wait' || lower.includes('verificar') || lower.includes('observar') || lower.includes('validar')) {
+      if ((step.action as string) === 'wait' || lower.includes('verificar') || lower.includes('observar') || lower.includes('validar')) {
         await targetPage.waitForTimeout(2000);
         screenshotBase64 = await takeScreenshot(targetPage);
         return { index, label: step.label, status: 'aprovado', detalhe: 'Verificação visual concluída.', screenshotBase64, duration: Date.now() - start };

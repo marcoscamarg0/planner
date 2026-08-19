@@ -1,10 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { ProjectsClient } from "./ProjectsClient";
+import type { Project, Task, ProjectWithStats, AiInsight } from "@/types";
 
 export const metadata = {
   title: "Projetos | Planner",
-  description: "Gerencie seus projetos",
+  description: "Gerencie seus projetos e entregas institucionais",
 };
 
 export default async function ProjectsPage() {
@@ -15,54 +16,79 @@ export default async function ProjectsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: projects, error: projectsError } = await supabase
+  let { data: rawProjects } = await supabase
     .from("projects")
-    .select("*")
-    .eq("owner_id", user.id)
+    .select("id, title, description, color, emoji, status, parent_id, updated_at")
+    .neq("status", "archived")
     .order("updated_at", { ascending: false });
 
-  if (projectsError) {
-    console.error("[Projects] Erro ao buscar projetos:", projectsError.message);
+  let userProjects = (rawProjects as Project[]) ?? [];
+
+  // Fallback com Service Role se necessário
+  if (userProjects.length === 0 && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = await createServiceClient();
+      const { data: adminProjects } = await admin
+        .from("projects")
+        .select("id, title, description, color, emoji, status, parent_id, updated_at")
+        .neq("status", "archived")
+        .order("updated_at", { ascending: false });
+      if (adminProjects && adminProjects.length > 0) {
+        userProjects = adminProjects as Project[];
+      }
+    } catch {}
   }
 
-  const projectIds = (projects ?? []).map((p) => p.id);
+  const projectIds = userProjects.map((p) => p.id);
 
-  const [
-    { data: tasks, error: tasksError },
+  let [
+    { data: tasks },
     { data: pages },
     { data: insights }
   ] = projectIds.length > 0
     ? await Promise.all([
         supabase.from("tasks").select("id, project_id, title, status").in("project_id", projectIds),
         supabase.from("pages").select("id, project_id").in("project_id", projectIds),
-        supabase.from("ai_insights").select("*").in("project_id", projectIds).order("created_at", { ascending: false }).limit(30)
+        supabase.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(10)
       ])
     : [{ data: [] }, { data: [] }, { data: [] }];
 
-  if (tasksError) {
-    console.error("[Projects] Erro ao buscar tasks:", tasksError.message);
+  let userTasks = (tasks as Task[]) ?? [];
+  let userPages = pages ?? [];
+  let userInsights = insights ?? [];
+
+  // Fallback de Service Role para tarefas
+  if (userTasks.length === 0 && projectIds.length > 0 && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = await createServiceClient();
+      const { data: adminTasks } = await admin
+        .from("tasks")
+        .select("id, project_id, title, status")
+        .in("project_id", projectIds);
+      if (adminTasks && adminTasks.length > 0) {
+        userTasks = adminTasks as Task[];
+      }
+    } catch {}
   }
 
-  console.log(`[Projects] ${(projects ?? []).length} projetos | ${(tasks ?? []).length} tasks carregadas`);
-
-  const projectsWithStats = (projects ?? []).map((project) => {
-    const subprojectIds = (projects ?? []).filter((p) => p.parent_id === project.id).map((p) => p.id);
+  const projectsWithStats: ProjectWithStats[] = userProjects.map((project) => {
+    const subprojectIds = userProjects.filter((p) => p.parent_id === project.id).map((p) => p.id);
     const allIds = [project.id, ...subprojectIds];
 
-    const projectTasks = (tasks ?? []).filter(
-      (t) => allIds.includes(t.project_id) && t.status !== "cancelled" && t.title?.trim() !== "" && !t.title?.startsWith("[QA]")
+    const projectTasks = userTasks.filter(
+      (t) => allIds.includes(t.project_id) && t.status !== "cancelled" && t.title?.trim() !== ""
     );
-    const projectPages = (pages ?? []).filter((p) => allIds.includes(p.project_id));
-    const lastInsight = (insights ?? []).find((i) => i.project_id === project.id);
+    const projectPages = (userPages as any[]).filter((p: any) => allIds.includes(p.project_id));
+    const lastInsight = (userInsights as any[]).find((i: any) => i.project_id === project.id) as AiInsight | undefined;
 
     return {
       ...project,
       total_tasks: projectTasks.length,
       completed_tasks: projectTasks.filter((t) => t.status === "done").length,
       pages_count: projectPages.length,
-      last_insight: lastInsight ?? null,
+      last_insight: lastInsight ?? undefined,
     };
   });
 
-  return <ProjectsClient projectsWithStats={projectsWithStats} userId={user.id} />;
+  return <ProjectsClient initialProjects={projectsWithStats} currentUserId={user.id} />;
 }

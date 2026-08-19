@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
@@ -11,13 +11,13 @@ import { createClient } from "@/lib/supabase/client";
 import type { Profile, Project } from "@/types";
 
 interface AppShellProps {
-  profile: Profile | null;
-  projects: Project[];
+  profile?: Profile | null;
+  projects?: Project[];
   children: React.ReactNode;
 }
 
-export function AppShell({ profile, projects, children }: AppShellProps) {
-  const [projectList, setProjectList] = useState<Project[]>(projects);
+export function AppShell({ profile = null, projects = [], children }: AppShellProps) {
+  const [projectList, setProjectList] = useState<Project[]>(() => projects ?? []);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const router = useRouter();
@@ -25,7 +25,7 @@ export function AppShell({ profile, projects, children }: AppShellProps) {
   const handleProjectCreated = (project: Project) => {
     setProjectList((prev) => [project, ...prev]);
     setNewProjectOpen(false);
-    router.push(`/projects/${project.id}`);
+    window.open(`/projects/${project.id}`, "_blank");
     router.refresh();
   };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -64,6 +64,61 @@ export function ProjectEditorClient({
   const [suggestedTasks, setSuggestedTasks] = useState<string[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const aiDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sincroniza tarefas em tempo real ao abrir a tela ou receber mutações
+  useEffect(() => {
+    async function syncTasks() {
+      try {
+        const res = await fetch(`/api/tasks?projectId=${project.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+            setTasks(data.tasks);
+          }
+        }
+      } catch (err) {
+        console.warn("Erro ao sincronizar tarefas:", err);
+      }
+    }
+    
+    // Se o SSR não veio com tarefas, tenta sincronizar imediatamente
+    if (initialTasks.length === 0) {
+      syncTasks();
+    }
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`project_tasks_${project.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "tasks" },
+        (payload) => {
+          const newTask = payload.new as Task;
+          setTasks((prev) => (prev.some((t) => t.id === newTask.id) ? prev : [newTask, ...prev]));
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "tasks" },
+        (payload) => {
+          const updated = payload.new as Task;
+          setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "tasks" },
+        (payload) => {
+          const deletedId = payload.old.id;
+          setTasks((prev) => prev.filter((t) => t.id !== deletedId));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [project.id]);
 
   const createPage = async () => {
     const supabase = createClient();
@@ -639,7 +694,7 @@ export function ProjectEditorClient({
           )}
 
           {["smart_runner", "batch_runner", "test_cases", "reports"].includes(tab) && (
-            <QaClient projectId={project.id} externalTab={tab as any} projectUrl={project.target_url || undefined} />
+            <QaClient projectId={project.id} externalTab={tab as any} projectUrl={project.target_url || undefined} onGoToTasks={() => setTab("tasks")} />
           )}
         </div>
       </div>

@@ -47,6 +47,8 @@ import {
   ExternalLink,
   FileImage,
   Plus,
+  PlusCircle,
+  Pencil,
   CheckSquare,
   Play,
   Share2,
@@ -55,6 +57,7 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
 import { BatchRunnerTab } from "@/components/qa/BatchRunnerTab";
+import { QaLiveConsole, type LogEntry } from "@/components/qa/QaLiveConsole";
 
 const MODELS = [
   { key: "auto-free", label: "Automático (Recomendado)", provider: "OpenRouter", badge: "Gratuito" },
@@ -244,9 +247,10 @@ interface QaClientProps {
   projectId: string; 
   externalTab?: ToolTab;
   projectUrl?: string;
+  onGoToTasks?: () => void;
 }
 
-export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) {
+export function QaClient({ projectId, externalTab, projectUrl, onGoToTasks }: QaClientProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -262,13 +266,26 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
   const [selectedFramework, setSelectedFramework] = useState("playwright");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [consoleLogs, setConsoleLogs] = useState<LogEntry[]>([]);
   const [result, setResult] = useState<string | null>(null);
   const [testCases, setTestCases] = useState<TestCase[] | null>(null);
   const [selectedTestCaseIds, setSelectedTestCaseIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [autoIndexTasks, setAutoIndexTasks] = useState(true);
+
+  const addLog = useCallback((level: "info" | "success" | "warn" | "error" | "ai", message: string) => {
+    setConsoleLogs((prev) => [
+      ...prev,
+      {
+        id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: new Date().toLocaleTimeString("pt-BR"),
+        level,
+        message,
+      },
+    ]);
+  }, []);
 
 
   // HTML file
@@ -314,6 +331,31 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
   const [showFlowModal, setShowFlowModal] = useState(false);
   const [savingFlow, setSavingFlow] = useState(false);
   const [saveFlowSuccess, setSaveFlowSuccess] = useState(false);
+
+  // Modal de revisão de casos de teste gerados
+  const [showNewTestCasesModal, setShowNewTestCasesModal] = useState(false);
+  const [newlyGeneratedTestCases, setNewlyGeneratedTestCases] = useState<TestCase[]>([]);
+  // Map of "tcId" -> Set of step indices selected (null = full case selected, not per step)
+  const [modalSelectedCaseIds, setModalSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [modalCreating, setModalCreating] = useState(false);
+  const [modalSuccess, setModalSuccess] = useState(false);
+  // Tracks which specific case is being created (per-case buttons): "modal-ai-{id}" | "modal-direct-{id}" | null
+  const [creatingTask, setCreatingTask] = useState<string | null>(null);
+
+  // Modal de Criação / Edição de Caso de Teste (Manual ou IA)
+  const [showCreateTcModal, setShowCreateTcModal] = useState(false);
+  const [editingTc, setEditingTc] = useState<TestCase | null>(null);
+  const [tcFormMode, setTcFormMode] = useState<"manual" | "ai">("manual");
+  const [tcFormId, setTcFormId] = useState("");
+  const [tcFormTitle, setTcFormTitle] = useState("");
+  const [tcFormCategory, setTcFormCategory] = useState<"happy_path" | "error" | "edge_case">("happy_path");
+  const [tcFormPriority, setTcFormPriority] = useState<"alta" | "media" | "baixa">("media");
+  const [tcFormSteps, setTcFormSteps] = useState<string[]>([""]);
+  const [tcFormExpectedResult, setTcFormExpectedResult] = useState("");
+  const [tcFormCreateTask, setTcFormCreateTask] = useState(true);
+  const [tcFormAiPrompt, setTcFormAiPrompt] = useState("");
+  const [generatingSingleTc, setGeneratingSingleTc] = useState(false);
+  const [savingTc, setSavingTc] = useState(false);
 
   // History Filters
   const [historySearch, setHistorySearch] = useState("");
@@ -930,7 +972,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
       .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
       .replace(/^- (.+)$/gm, '<li>$1</li>')
       .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
-      .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
+      .replace(/(<li>.*<\/li>\n?)+/g, (s: string) => `<ul>${s}</ul>`)
       .replace(/\n\n/g, '</p><p>')
       .replace(/^(?!<[hup]|<li|<bl|<hr|<pr)/gm, '<p>')
       .replace(/(?<!>)$/gm, '</p>')
@@ -975,8 +1017,14 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
     setResult(null);
     setTestCases(null);
     setError(null);
+    setConsoleLogs([]);
+
+    addLog("info", "🚀 Iniciando pipeline de análise e geração de QA...");
+    addLog("ai", `🧠 Conectando aos modelos neurais (Google Gemini / ${selectedModel})...`);
+    addLog("info", `📑 Processando especificações de entrada (${input.trim().length} caracteres)...`);
 
     try {
+      addLog("ai", "⚡ Enviando payload para o Web Service /api/ai/qa...");
       const res = await fetch("/api/ai/qa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -992,11 +1040,15 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha na geração");
 
+      addLog("success", "✅ Resposta recebida com sucesso dos modelos de IA.");
+
       if (data.report) {
         setSelectedReport(data.report);
+        addLog("info", `💾 Sincronizado com Appwrite Cloud (ID do Relatório: ${data.report.id || data.report.$id || "salvo"}).`);
       }
 
       if (activeTab === "test_cases") {
+        addLog("ai", "🔍 Estruturando casos de teste em BDD / Critérios de Aceitação...");
         setTcStatus({});
         try {
           let rawJson = data.result;
@@ -1017,17 +1069,35 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
             id: tc.id || `tc-new-${Date.now()}-${idx}`
           }));
           setTestCases(tcs);
+          addLog("success", `✨ ${tcs.length} casos de teste estruturados e prontos.`);
+
+          // Abre modal de revisão dos casos gerados
+          if (projectId) {
+            setNewlyGeneratedTestCases(tcs);
+            setModalSelectedCaseIds(new Set(tcs.map((tc: TestCase) => tc.id)));
+            setModalSuccess(false);
+            setShowNewTestCasesModal(true);
+          } else if (autoIndexTasks) {
+            // Sem projeto — mantém comportamento legado silencioso
+            addLog("warn", "⚠️ Nenhum projeto selecionado. Casos exibidos mas não indexados.");
+          }
+
+          setTimeout(() => {
+            document.getElementById("test-cases-result-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 200);
         } catch {
-          // Parse failed — show the raw result as an error hint, don't show "Script Gerado"
+          addLog("error", "⚠️ Não foi possível interpretar o JSON dos casos de teste. Exibindo resposta bruta.");
           setError("Não foi possível interpretar os casos de teste. Tente novamente ou use um modelo diferente.");
         }
       } else {
         setResult(data.result);
+        addLog("success", "✨ Relatório de QA gerado e formatado com sucesso!");
       }
 
       // Refresh reports after generation
       loadReports();
     } catch (e: any) {
+      addLog("error", `❌ Erro na geração: ${e.message || "Falha de comunicação com o servidor"}`);
       setError(e.message || "Ocorreu um erro inesperado.");
     } finally {
       setLoading(false);
@@ -1239,47 +1309,168 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
     if (w) { w.document.write(html); w.document.close(); }
   };
 
-  const saveTestCasesToProject = async (projectId: string) => {
-    if (!testCases || !projectId) return;
+  const saveTestCasesToProject = async (targetProjId: string, customCases?: TestCase[]) => {
+    const casesToSave = customCases || (selectedTestCaseIds.size > 0
+      ? (testCases || []).filter(tc => selectedTestCaseIds.has(tc.id))
+      : (testCases || []));
+
+    if (!casesToSave || casesToSave.length === 0 || !targetProjId) {
+      alert("Nenhum caso de teste disponível ou selecionado para indexar.");
+      return;
+    }
+
     setSavingToProject(true);
     setSaveSuccess(false);
     try {
-      const supabase = createClient();
-
-      // Respeita a seleção: se houver casos selecionados, salva apenas eles; caso contrário, salva todos
-      const casesToSave = selectedTestCaseIds.size > 0
-        ? testCases.filter(tc => selectedTestCaseIds.has(tc.id))
-        : testCases;
-      
-      const tasksToInsert = casesToSave.map(tc => {
+      let failCount = 0;
+      for (const tc of casesToSave) {
         let desc = `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n`;
         desc += `**Prioridade:** ${tc.priority.toUpperCase()}\n\n`;
-        desc += `**Passos:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
+        desc += `**Passos de Execução:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
         desc += `**Resultado Esperado:**\n${tc.expected_result}`;
-        
-        return {
-          project_id: projectId,
-          title: `[QA] ${tc.id} — ${tc.title}`,
-          description: desc,
-          status: "todo",
-          priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
-          metadata: tc.evidence ? { evidence: tc.evidence } : {}
-        };
-      });
 
-      const { error } = await supabase.from("tasks").insert(tasksToInsert);
-      if (error) throw error;
-      
+        const res = await fetch("/api/tasks/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: targetProjId,
+            title: `[QA] ${tc.id} — ${tc.title}`,
+            description: desc,
+            status: "todo",
+            priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
+            metadata: {
+              test_case_id: tc.id,
+              category: tc.category,
+              steps: tc.steps,
+              expected_result: tc.expected_result,
+              evidence: tc.evidence || null,
+            },
+          }),
+        });
+        if (!res.ok) failCount++;
+      }
+
+      if (failCount > 0) {
+        throw new Error(`${failCount} tarefas não puderam ser salvas.`);
+      }
+
       setSaveSuccess(true);
+      addLog("success", `📥 ${casesToSave.length} casos de teste indexados e salvos com sucesso na aba Tarefas!`);
+      alert(`🎉 ${casesToSave.length} casos de teste foram indexados com sucesso na aba Tarefas do Projeto!`);
       setTimeout(() => { setShowSaveModal(false); setSaveSuccess(false); }, 1800);
     } catch (e: any) {
+      addLog("error", `❌ Erro ao salvar tarefas: ${e.message}`);
       alert("Erro ao salvar tarefas: " + e.message);
     } finally {
       setSavingToProject(false);
     }
   };
 
-  const [creatingTask, setCreatingTask] = useState<string | null>(null);
+  const createTestCaseTask = async (tc: TestCase) => {
+    if (!projectId) {
+      alert("Nenhum projeto selecionado. Você precisa estar dentro de um projeto para criar tarefas.");
+      return;
+    }
+    setCreatingTask(tc.id);
+    try {
+      let desc = `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n`;
+      desc += `**Prioridade:** ${tc.priority.toUpperCase()}\n\n`;
+      desc += `**Passos de Execução:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
+      desc += `**Resultado Esperado:**\n${tc.expected_result}`;
+
+      const res = await fetch("/api/tasks/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          title: `[QA] ${tc.id} — ${tc.title}`,
+          description: desc,
+          status: "todo",
+          priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
+          metadata: {
+            test_case_id: tc.id,
+            category: tc.category,
+            steps: tc.steps,
+            expected_result: tc.expected_result,
+            evidence: tc.evidence || null,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Falha ao criar tarefa");
+      }
+
+      addLog("success", `✅ Tarefa criada na aba Tarefas: [QA] ${tc.id} — ${tc.title}`);
+      alert(`Caso de teste "${tc.id} — ${tc.title}" indexado com sucesso na aba Tarefas!`);
+    } catch (e: any) {
+      alert("Erro ao criar tarefa: " + e.message);
+    } finally {
+      setCreatingTask(null);
+    }
+  };
+
+  const createAiTestCaseTask = async (tc: TestCase) => {
+    if (!projectId) {
+      alert("Nenhum projeto selecionado. Você precisa estar dentro de um projeto para criar tarefas.");
+      return;
+    }
+    setCreatingTask(`ai-${tc.id}`);
+    try {
+      addLog("ai", `✨ Gerando especificação e plano completo com IA para: [QA] ${tc.id} — ${tc.title}...`);
+      const planRes = await fetch("/api/ai/task-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskTitle: `[QA] ${tc.id} — ${tc.title}`,
+          currentDescription: `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n**Prioridade:** ${tc.priority}\n\n**Passos:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n**Resultado Esperado:**\n${tc.expected_result}`,
+          projectUrl: projectUrl,
+        }),
+      });
+      const planData = await planRes.json();
+      const aiDesc = planData.plan || planData.result || "";
+
+      const finalDesc = aiDesc || `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n` +
+        `**Prioridade:** ${tc.priority.toUpperCase()}\n\n` +
+        `**Passos de Execução:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n` +
+        `**Resultado Esperado:**\n${tc.expected_result}`;
+
+      const createRes = await fetch("/api/tasks/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          title: `[QA] ${tc.id} — ${tc.title}`,
+          description: finalDesc,
+          status: "todo",
+          priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
+          metadata: {
+            test_case_id: tc.id,
+            category: tc.category,
+            steps: tc.steps,
+            expected_result: tc.expected_result,
+            evidence: tc.evidence || null,
+            ai_enriched: true,
+          },
+        }),
+      });
+
+      if (!createRes.ok) {
+        const errData = await createRes.json();
+        throw new Error(errData.error || "Falha ao criar tarefa");
+      }
+
+      addLog("success", `✨ Tarefa IA criada na aba Tarefas: [QA] ${tc.id} — ${tc.title}`);
+      alert(`✨ Tarefa com IA criada com sucesso: "${tc.id} — ${tc.title}"! Acesse a aba Tarefas.`);
+    } catch (e: any) {
+      addLog("error", `❌ Erro ao criar tarefa com IA: ${e.message}`);
+      alert("Erro ao criar tarefa com IA: " + e.message);
+    } finally {
+      setCreatingTask(null);
+    }
+  };
+
   const createStepTask = async (tcId: string, tcTitle: string, stepIndex: number, stepText: string, expectedResult: string) => {
     if (!projectId) {
       alert("Nenhum projeto selecionado. Você precisa estar dentro de um projeto para criar tarefas.");
@@ -1287,21 +1478,193 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
     }
     setCreatingTask(`${tcId}-${stepIndex}`);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.from("tasks").insert({
-        project_id: projectId,
-        title: `[QA] ${tcTitle} — Passo ${stepIndex + 1}`,
-        description: `**Caso de teste:** ${tcId} — ${tcTitle}\n\n**Passo ${stepIndex + 1} a ser executado/automatizado:**\n${stepText}\n\n**Resultado Esperado:**\n${expectedResult}`,
-        status: "todo",
-        priority: "medium",
+      const res = await fetch("/api/tasks/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          title: `[QA] ${tcTitle} — Passo ${stepIndex + 1}`,
+          description: `**Caso de teste:** ${tcId} — ${tcTitle}\n\n**Passo ${stepIndex + 1} a ser executado/automatizado:**\n${stepText}\n\n**Resultado Esperado:**\n${expectedResult}`,
+          status: "todo",
+          priority: "medium",
+        }),
       });
-      if (error) throw error;
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Falha ao criar tarefa");
+      }
       alert("Tarefa criada com sucesso! Verifique a aba Tarefas.");
     } catch (e: any) {
       alert("Erro ao criar tarefa: " + e.message);
     } finally {
       setCreatingTask(null);
     }
+  };
+
+  const openCreateTcModal = () => {
+    const nextNum = (testCases?.length || 0) + 1;
+    const pad = nextNum < 10 ? `00${nextNum}` : nextNum < 100 ? `0${nextNum}` : `${nextNum}`;
+    setEditingTc(null);
+    setTcFormMode("manual");
+    setTcFormId(`TC${pad}`);
+    setTcFormTitle("");
+    setTcFormCategory("happy_path");
+    setTcFormPriority("media");
+    setTcFormSteps([""]);
+    setTcFormExpectedResult("");
+    setTcFormCreateTask(true);
+    setTcFormAiPrompt("");
+    setShowCreateTcModal(true);
+  };
+
+  const openEditTcModal = (tc: TestCase) => {
+    setEditingTc(tc);
+    setTcFormMode("manual");
+    setTcFormId(tc.id);
+    setTcFormTitle(tc.title);
+    setTcFormCategory((tc.category as any) || "happy_path");
+    setTcFormPriority((tc.priority as any) || "media");
+    setTcFormSteps(tc.steps && tc.steps.length > 0 ? [...tc.steps] : [""]);
+    setTcFormExpectedResult(tc.expected_result || "");
+    setTcFormCreateTask(false);
+    setShowCreateTcModal(true);
+  };
+
+  const handleGenerateSingleTcWithAi = async () => {
+    if (!tcFormAiPrompt.trim()) {
+      alert("Por favor, descreva o cenário do caso de teste para a IA gerar.");
+      return;
+    }
+    setGeneratingSingleTc(true);
+    try {
+      addLog("ai", `✨ Gerando caso de teste específico com IA: "${tcFormAiPrompt.trim().slice(0, 50)}..."`);
+      const nextNum = (testCases?.length || 0) + 1;
+      const pad = nextNum < 10 ? `00${nextNum}` : nextNum < 100 ? `0${nextNum}` : `${nextNum}`;
+      
+      const prompt = `Gere exatamente 1 caso de teste estruturado para o seguinte cenário:\n"${tcFormAiPrompt.trim()}".\n\nRetorne EXCLUSIVAMENTE em formato JSON no formato:\n{\n  "id": "TC${pad}",\n  "title": "Título conciso",\n  "category": "happy_path" | "error" | "edge_case",\n  "priority": "alta" | "media" | "baixa",\n  "steps": ["passo 1", "passo 2", "passo 3"],\n  "expected_result": "Resultado esperado claro"\n}`;
+
+      const res = await fetch("/api/ai/qa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool_type: "test_cases",
+          input: prompt,
+          model: selectedModel,
+          project_id: projectId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha na geração");
+
+      let rawJson = data.result;
+      const match = rawJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match) rawJson = match[1];
+      else {
+        const firstBrace = rawJson.search(/[\{\[]/);
+        const lastBrace = Math.max(rawJson.lastIndexOf("}"), rawJson.lastIndexOf("]"));
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          rawJson = rawJson.substring(firstBrace, lastBrace + 1);
+        }
+      }
+
+      const parsed = JSON.parse(rawJson);
+      const single = Array.isArray(parsed) ? parsed[0] : (parsed.test_cases ? parsed.test_cases[0] : parsed);
+
+      if (single) {
+        if (single.id) setTcFormId(single.id);
+        if (single.title) setTcFormTitle(single.title);
+        if (single.category) setTcFormCategory(single.category);
+        if (single.priority) setTcFormPriority(single.priority);
+        if (Array.isArray(single.steps) && single.steps.length > 0) setTcFormSteps(single.steps);
+        if (single.expected_result) setTcFormExpectedResult(single.expected_result);
+        setTcFormMode("manual");
+        addLog("success", `✅ Caso de teste "${single.title}" gerado pela IA! Revise e clique em Salvar.`);
+      }
+    } catch (err: any) {
+      alert("Erro ao gerar caso com IA: " + err.message);
+    } finally {
+      setGeneratingSingleTc(false);
+    }
+  };
+
+  const handleSaveCustomTc = async () => {
+    if (!tcFormTitle.trim()) {
+      alert("O título do caso de teste é obrigatório.");
+      return;
+    }
+    const cleanSteps = tcFormSteps.map(s => s.trim()).filter(Boolean);
+    if (cleanSteps.length === 0) {
+      alert("Adicione pelo menos 1 passo de execução.");
+      return;
+    }
+    if (!tcFormExpectedResult.trim()) {
+      alert("O resultado esperado é obrigatório.");
+      return;
+    }
+
+    setSavingTc(true);
+    try {
+      const tcData: TestCase = {
+        id: tcFormId.trim() || `TC00${(testCases?.length || 0) + 1}`,
+        title: tcFormTitle.trim(),
+        category: tcFormCategory,
+        priority: tcFormPriority,
+        steps: cleanSteps,
+        expected_result: tcFormExpectedResult.trim(),
+      };
+
+      if (editingTc) {
+        setTestCases(prev => (prev || []).map(tc => tc.id === editingTc.id ? tcData : tc));
+        addLog("success", `✏️ Caso de teste "${tcData.id} — ${tcData.title}" atualizado.`);
+      } else {
+        setTestCases(prev => [...(prev || []), tcData]);
+        addLog("success", `✨ Novo caso de teste "${tcData.id} — ${tcData.title}" adicionado à lista.`);
+
+        if (tcFormCreateTask && projectId) {
+          let desc = `**Categoria:** ${CATEGORY_LABEL[tcData.category] || tcData.category}\n`;
+          desc += `**Prioridade:** ${tcData.priority.toUpperCase()}\n\n`;
+          desc += `**Passos de Execução:**\n${tcData.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
+          desc += `**Resultado Esperado:**\n${tcData.expected_result}`;
+
+          await fetch("/api/tasks/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: projectId,
+              title: `[QA] ${tcData.id} — ${tcData.title}`,
+              description: desc,
+              status: "todo",
+              priority: tcData.priority === "alta" ? "high" : tcData.priority === "baixa" ? "low" : "medium",
+              metadata: {
+                test_case_id: tcData.id,
+                category: tcData.category,
+                steps: tcData.steps,
+                expected_result: tcData.expected_result,
+              },
+            }),
+          });
+          addLog("success", `🎯 Tarefa criada na aba Tarefas para o caso "${tcData.id}".`);
+        }
+      }
+
+      setShowCreateTcModal(false);
+    } catch (err: any) {
+      alert("Erro ao salvar caso de teste: " + err.message);
+    } finally {
+      setSavingTc(false);
+    }
+  };
+
+  const handleDeleteSingleTc = (tcId: string) => {
+    if (!confirm(`Deseja realmente remover o caso de teste ${tcId}?`)) return;
+    setTestCases(prev => (prev || []).filter(tc => tc.id !== tcId));
+    setSelectedTestCaseIds(prev => {
+      const next = new Set(prev);
+      next.delete(tcId);
+      return next;
+    });
+    addLog("info", `🗑️ Caso de teste ${tcId} removido da lista.`);
   };
 
   // Converts current test cases into ReactFlow nodes/edges and saves to project.flow_data
@@ -2361,6 +2724,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
         </div>
 
         {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto min-h-0 pt-2 pb-24">
         {activeTab === "smart_runner" ? (
           <SmartRunnerTab initialReport={selectedReport?.type === 'smart_runner' ? selectedReport.result_json : null} onImportPdf={importPdfFromUrl} defaultUrl={projectUrl} />
         ) : activeTab === "batch_runner" ? (
@@ -2452,11 +2816,11 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                       onClick={async () => {
                         if (!input.trim()) return;
                         setLoading(true);
-                        setLogs([]);
+                        setConsoleLogs([]);
                         setResult(null);
                         setError(null);
                         try {
-                          if (selectedReportType === "test_cases") {
+                          if ((selectedReportType as string) === "test_cases") {
                             const res = await fetch("/api/ai/qa/stream", {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
@@ -2477,7 +2841,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                               const { value, done } = await reader.read();
                               if (done) break;
                               buffer += decoder.decode(value, { stream: true });
-                              const lines = buffer.split("\\n");
+                              const lines = buffer.split("\n");
                               buffer = lines.pop() || "";
                               
                               for (const line of lines) {
@@ -2485,7 +2849,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                                 try {
                                   const parsed = JSON.parse(line);
                                   if (parsed.type === "log") {
-                                    setLogs(prev => [...prev, parsed.message]);
+                                    addLog("ai", parsed.message);
                                   } else if (parsed.type === "result") {
                                     if (parsed.report) setSelectedReport(parsed.report);
                                     setResult(parsed.result);
@@ -2528,24 +2892,8 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                   </div>
                 </div>
 
-                {/* Logs Terminal UI */}
-                {loading && selectedReportType === "test_cases" && (
-                  <div className="bg-black/90 border border-primary/20 rounded-xl p-4 font-mono text-xs text-primary/80 h-48 overflow-y-auto shadow-inner">
-                    <div className="flex items-center gap-2 mb-3 sticky top-0 bg-black/90 pb-2 border-b border-primary/20">
-                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                      <span className="font-semibold tracking-wider uppercase text-[10px]">Console de Geração</span>
-                    </div>
-                    <div className="space-y-1.5 opacity-90 flex flex-col justify-end min-h-[100px]">
-                      {logs.map((log, i) => (
-                        <div key={i} className="flex gap-2">
-                          <span className="text-primary/40 shrink-0">[{new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}]</span>
-                          <span className="text-primary break-words whitespace-pre-wrap">{log}</span>
-                        </div>
-                      ))}
-                      {logs.length === 0 && <div className="text-primary/50 italic">Iniciando a conexão segura...</div>}
-                    </div>
-                  </div>
-                )}
+                {/* Live Execution Console Terminal */}
+                <QaLiveConsole logs={consoleLogs} loading={loading} onClear={() => setConsoleLogs([])} />
 
                 {/* Error */}
                 {error && (
@@ -2643,17 +2991,41 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
             {/* HTML file selector removed */}
 
 
-            <div className="flex justify-end">
-              <button
-                onClick={handleGenerate}
-                disabled={loading || !input.trim()}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all disabled:opacity-50 shadow-lg shadow-primary/25"
-              >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {loading ? "Gerando..." : "Gerar com IA"}
-              </button>
+            <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none transition-colors bg-accent/30 px-3 py-1.5 rounded-lg border border-border/50">
+                <input
+                  type="checkbox"
+                  checked={autoIndexTasks}
+                  onChange={(e) => setAutoIndexTasks(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer accent-primary"
+                />
+                <span className="font-medium">📥 Indexar automaticamente na aba <strong>Tarefas</strong></span>
+              </label>
+
+              <div className="flex items-center gap-2">
+                {activeTab === "test_cases" && (
+                  <button
+                    onClick={openCreateTcModal}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border bg-card hover:bg-accent text-foreground text-sm font-semibold transition-all shadow-sm cursor-pointer active:scale-95"
+                  >
+                    <PlusCircle className="w-4 h-4 text-primary" />
+                    Criar Manualmente
+                  </button>
+                )}
+                <button
+                  onClick={handleGenerate}
+                  disabled={loading || !input.trim()}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all disabled:opacity-50 shadow-lg shadow-primary/25 cursor-pointer"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {loading ? "Gerando..." : "Gerar com IA"}
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Live Execution Console Terminal */}
+          <QaLiveConsole logs={consoleLogs} loading={loading} onClear={() => setConsoleLogs([])} />
 
           {/* Error */}
           {error && (
@@ -2666,7 +3038,7 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
           {/* Test Cases Result */}
           <AnimatePresence>
             {testCases && testCases.length > 0 && (
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+              <motion.div id="test-cases-result-section" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 pt-2">
 
                 {/* ── Execution Summary Bar ── */}
                 {(() => {
@@ -2715,10 +3087,19 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
 
                 {/* ── Action Bar ── */}
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <FlaskConical className="w-4 h-4 text-primary" />
-                    <h2 className="text-sm font-semibold text-foreground">{testCases.length} casos de teste</h2>
-                    <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Salvo automaticamente</span>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <FlaskConical className="w-4 h-4 text-primary" />
+                      <h2 className="text-sm font-semibold text-foreground">{testCases.length} casos de teste</h2>
+                      <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Salvo automaticamente</span>
+                    </div>
+                    <button
+                      onClick={openCreateTcModal}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all shadow-sm shadow-primary/20 cursor-pointer active:scale-95"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      Novo Caso de Teste
+                    </button>
                   </div>
                   
                   {/* Bulk Actions for Test Cases */}
@@ -2793,18 +3174,18 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                       }}
                       disabled={savingToProject}
                       className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border font-semibold transition-all",
+                        "flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer",
                         saveSuccess
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                          : "bg-sky-500/5 text-sky-400 border-sky-500/30 hover:bg-sky-500/10 hover:border-sky-400/50"
+                          ? "bg-emerald-500 text-white shadow-emerald-500/30"
+                          : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/25"
                       )}
                     >
                       {savingToProject ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...</>
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Indexando...</>
                       ) : saveSuccess ? (
-                        <><CheckCircle2 className="w-3.5 h-3.5" /> Salvo no Projeto!</>
+                        <><CheckCircle2 className="w-3.5 h-3.5" /> Indexado no Projeto!</>
                       ) : (
-                        <><Check className="w-3.5 h-3.5" /> Salvar no Projeto</>
+                        <><Sparkles className="w-3.5 h-3.5" /> {selectedTestCaseIds.size > 0 ? `📥 Indexar ${selectedTestCaseIds.size} nas Tarefas` : `📥 Indexar Todos (${testCases.length}) nas Tarefas`}</>
                       )}
                     </button>
                     <button
@@ -3024,6 +3405,42 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                           <div className="flex items-center gap-2">
                             <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border", PRIORITY_COLOR[tc.priority] || PRIORITY_COLOR["media"])}>{tc.priority}</span>
                             <span className="text-[10px] text-muted-foreground bg-accent px-2 py-0.5 rounded-full">{CATEGORY_LABEL[tc.category]}</span>
+                            <button
+                              onClick={() => createAiTestCaseTask(tc)}
+                              disabled={creatingTask === `ai-${tc.id}` || creatingTask === tc.id}
+                              className="flex items-center gap-1.5 px-2.5 py-1 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 rounded-lg text-[11px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                              title="Usar IA para gerar um plano de teste completo e criar a tarefa"
+                            >
+                              {creatingTask === `ai-${tc.id}` ? (
+                                <><Loader2 className="w-3 h-3 animate-spin" /> Gerando...</>
+                              ) : (
+                                <><Sparkles className="w-3 h-3 text-violet-400" /> Criar com IA</>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => createTestCaseTask(tc)}
+                              disabled={creatingTask === tc.id || creatingTask === `ai-${tc.id}`}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-[11px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                              title="Indexar e adicionar este caso diretamente à aba Tarefas"
+                            >
+                              {creatingTask === tc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                              Indexar Tarefa
+                            </button>
+                            <button
+                              onClick={() => openEditTcModal(tc)}
+                              className="flex items-center gap-1 px-2 py-1 bg-accent/50 hover:bg-accent text-muted-foreground hover:text-foreground border border-border/60 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                              title="Editar este caso de teste"
+                            >
+                              <Pencil className="w-3 h-3 text-muted-foreground" />
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSingleTc(tc.id)}
+                              className="p-1 text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer"
+                              title="Excluir este caso de teste"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
@@ -3111,6 +3528,17 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
                       </motion.div>
                     );
                   })}
+
+                  {/* Add another TC button at bottom */}
+                  <motion.button
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    onClick={openCreateTcModal}
+                    className="w-full py-3.5 border-2 border-dashed border-border hover:border-primary/50 bg-card/40 hover:bg-primary/5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold text-muted-foreground hover:text-primary transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <PlusCircle className="w-4 h-4 text-primary" />
+                    + Adicionar Outro Caso de Teste (Manual ou com IA)
+                  </motion.button>
                 </div>
               </motion.div>
             )}
@@ -3244,6 +3672,8 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
         </div>
       )}
 
+        </div>
+
       {/* Delete Modal */}
       {deletingReportIds && deletingReportIds.length > 0 && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -3275,6 +3705,616 @@ export function QaClient({ projectId, externalTab, projectUrl }: QaClientProps) 
         </div>
       )}
 
+      {/* ════════════════════════════════════════════════════════════
+          MODAL DE REVISÃO — Casos de Teste Gerados
+      ════════════════════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showNewTestCasesModal && newlyGeneratedTestCases.length > 0 && (
+          <motion.div
+            key="new-tc-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(6px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget) setShowNewTestCasesModal(false); }}
+          >
+            <motion.div
+              key="new-tc-modal-panel"
+              initial={{ opacity: 0, scale: 0.94, y: 32 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 32 }}
+              transition={{ type: "spring", stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl border border-border bg-background shadow-2xl overflow-hidden"
+              style={{ boxShadow: "0 0 0 1px rgba(99,102,241,0.18), 0 32px 80px rgba(0,0,0,0.55)" }}
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-gradient-to-r from-primary/10 via-violet-500/5 to-transparent shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-base font-bold text-foreground tracking-tight">
+                    {newlyGeneratedTestCases.length} caso{newlyGeneratedTestCases.length !== 1 ? "s" : ""} de teste gerado{newlyGeneratedTestCases.length !== 1 ? "s" : ""}
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Selecione os casos para enviar às <strong>Tarefas</strong>, ou use ✨ IA para criar uma tarefa enriquecida por caso
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (modalSelectedCaseIds.size === newlyGeneratedTestCases.length) {
+                      setModalSelectedCaseIds(new Set());
+                    } else {
+                      setModalSelectedCaseIds(new Set(newlyGeneratedTestCases.map(tc => tc.id)));
+                    }
+                  }}
+                  className="text-[11px] font-semibold text-primary hover:underline px-2 py-1 rounded-lg hover:bg-primary/10 transition-all shrink-0"
+                >
+                  {modalSelectedCaseIds.size === newlyGeneratedTestCases.length ? "Desmarcar todos" : "Selecionar todos"}
+                </button>
+                <button
+                  onClick={() => setShowNewTestCasesModal(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body — scrollable list */}
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                {newlyGeneratedTestCases.map((tc, tcIdx) => {
+                  const CatIcon = CATEGORY_ICON[tc.category] || AlertCircle;
+                  const isSelected = modalSelectedCaseIds.has(tc.id);
+                  const isCreatingAI = creatingTask === `modal-ai-${tc.id}`;
+                  const isCreatingDirect = creatingTask === `modal-direct-${tc.id}`;
+                  return (
+                    <motion.div
+                      key={tc.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: tcIdx * 0.04 }}
+                      className={cn(
+                        "rounded-xl border p-4 space-y-2.5 transition-all",
+                        isSelected
+                          ? "border-primary/50 bg-primary/5 shadow-sm shadow-primary/10"
+                          : "border-border bg-muted/20"
+                      )}
+                    >
+                      {/* Case header row */}
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            const next = new Set(modalSelectedCaseIds);
+                            if (next.has(tc.id)) next.delete(tc.id);
+                            else next.add(tc.id);
+                            setModalSelectedCaseIds(next);
+                          }}
+                          className="mt-1 w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <CatIcon className={cn("w-3.5 h-3.5 shrink-0", CATEGORY_COLOR[tc.category])} />
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{tc.id}</span>
+                            <span className="text-sm font-semibold text-foreground">{tc.title}</span>
+                            <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ml-auto shrink-0", PRIORITY_COLOR[tc.priority] || PRIORITY_COLOR["media"])}>
+                              {tc.priority}
+                            </span>
+                          </div>
+
+                          {/* Steps */}
+                          <ol className="mt-2.5 space-y-1.5 pl-0.5">
+                            {tc.steps.map((step, si) => (
+                              <li key={si} className="flex items-start gap-2 text-xs text-foreground/85">
+                                <span className="shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                                  {si + 1}
+                                </span>
+                                <span className="flex-1 leading-relaxed">{step}</span>
+                              </li>
+                            ))}
+                          </ol>
+
+                          {/* Expected result */}
+                          <div className="mt-2.5 pt-2 border-t border-border/40">
+                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Resultado Esperado: </span>
+                            <span className="text-xs text-emerald-400">{tc.expected_result}</span>
+                          </div>
+
+                          {/* Per-case action buttons */}
+                          <div className="mt-3 flex items-center gap-2 flex-wrap">
+                            {/* AI-enriched task */}
+                            <button
+                              disabled={isCreatingAI || isCreatingDirect || !projectId}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!projectId) { alert("Nenhum projeto selecionado."); return; }
+                                setCreatingTask(`modal-ai-${tc.id}`);
+                                try {
+                                  const res = await fetch("/api/ai/task-plan", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      taskTitle: `[QA] ${tc.id} — ${tc.title}`,
+                                      projectId,
+                                      steps: tc.steps,
+                                      expected_result: tc.expected_result,
+                                      category: CATEGORY_LABEL[tc.category] || tc.category,
+                                      priority: tc.priority,
+                                    }),
+                                  });
+                                  const data = await res.json();
+                                  const aiDesc = data.plan || data.result || "";
+                                  // Cria via API route (server-side, sem problema de permissão)
+                                  const createRes = await fetch("/api/tasks/create", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      project_id: projectId,
+                                      title: `[QA] ${tc.id} — ${tc.title}`,
+                                      description: aiDesc || `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n**Prioridade:** ${tc.priority.toUpperCase()}\n\n**Passos:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n**Resultado Esperado:**\n${tc.expected_result}`,
+                                      status: "todo",
+                                      priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
+                                      metadata: { test_case_id: tc.id, category: tc.category, steps: tc.steps, expected_result: tc.expected_result, ai_enriched: true },
+                                    }),
+                                  });
+                                  if (!createRes.ok) {
+                                    const errData = await createRes.json();
+                                    throw new Error(errData.error || "Erro ao criar tarefa");
+                                  }
+                                  addLog("success", `✨ Tarefa IA criada: [QA] ${tc.id} — ${tc.title}`);
+                                  // Remove do modal
+                                  setNewlyGeneratedTestCases(prev => prev.filter(t => t.id !== tc.id));
+                                  setModalSelectedCaseIds(prev => { const n = new Set(prev); n.delete(tc.id); return n; });
+                                } catch (err: any) {
+                                  alert("Erro ao criar tarefa com IA: " + err.message);
+                                } finally {
+                                  setCreatingTask(null);
+                                }
+                              }}
+                              className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all",
+                                isCreatingAI || isCreatingDirect || !projectId
+                                  ? "opacity-50 cursor-not-allowed border-violet-500/20 text-violet-400 bg-violet-500/5"
+                                  : "border-violet-500/30 text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 hover:border-violet-500/50 active:scale-95 cursor-pointer"
+                              )}
+                              title="Usar IA para enriquecer a descrição da tarefa antes de criar"
+                            >
+                              {isCreatingAI ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                              Criar com IA
+                            </button>
+
+                            {/* Direct task */}
+                            <button
+                              disabled={isCreatingAI || isCreatingDirect || !projectId}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!projectId) { alert("Nenhum projeto selecionado."); return; }
+                                setCreatingTask(`modal-direct-${tc.id}`);
+                                try {
+                                  let desc = `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n`;
+                                  desc += `**Prioridade:** ${tc.priority.toUpperCase()}\n\n`;
+                                  desc += `**Passos de Execução:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
+                                  desc += `**Resultado Esperado:**\n${tc.expected_result}`;
+                                  const createRes = await fetch("/api/tasks/create", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      project_id: projectId,
+                                      title: `[QA] ${tc.id} — ${tc.title}`,
+                                      description: desc,
+                                      status: "todo",
+                                      priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
+                                      metadata: { test_case_id: tc.id, category: tc.category, steps: tc.steps, expected_result: tc.expected_result },
+                                    }),
+                                  });
+                                  if (!createRes.ok) {
+                                    const errData = await createRes.json();
+                                    throw new Error(errData.error || "Erro ao criar tarefa");
+                                  }
+                                  addLog("success", `✅ Tarefa criada: [QA] ${tc.id} — ${tc.title}`);
+                                  setNewlyGeneratedTestCases(prev => prev.filter(t => t.id !== tc.id));
+                                  setModalSelectedCaseIds(prev => { const n = new Set(prev); n.delete(tc.id); return n; });
+                                } catch (err: any) {
+                                  alert("Erro ao criar tarefa: " + err.message);
+                                } finally {
+                                  setCreatingTask(null);
+                                }
+                              }}
+                              className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all",
+                                isCreatingAI || isCreatingDirect || !projectId
+                                  ? "opacity-50 cursor-not-allowed border-emerald-500/20 text-emerald-400 bg-emerald-500/5"
+                                  : "border-emerald-500/30 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 hover:border-emerald-500/50 active:scale-95 cursor-pointer"
+                              )}
+                              title="Criar tarefa diretamente com os passos do caso de teste"
+                            >
+                              {isCreatingDirect ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                              Criar Tarefa
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+
+                {newlyGeneratedTestCases.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-3" />
+                    <p className="text-sm font-semibold text-foreground">Todas as tarefas foram criadas!</p>
+                    <p className="text-xs text-muted-foreground mt-1">Vá para a aba Tarefas para visualizá-las.</p>
+                    {onGoToTasks && (
+                      <button
+                        onClick={() => { setShowNewTestCasesModal(false); onGoToTasks(); }}
+                        className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all active:scale-95"
+                      >
+                        <CheckSquare className="w-4 h-4" />
+                        Ir para Tarefas
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              {newlyGeneratedTestCases.length > 0 && (
+                <div className="shrink-0 px-6 py-4 border-t border-border bg-muted/30 flex items-center justify-between gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">{modalSelectedCaseIds.size}</span> de {newlyGeneratedTestCases.length} selecionado{modalSelectedCaseIds.size !== 1 ? "s" : ""}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowNewTestCasesModal(false)}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent border border-border transition-all"
+                    >
+                      Fechar
+                    </button>
+                    {modalSuccess ? (
+                      <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-sm font-semibold">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Tarefas criadas!
+                      </div>
+                    ) : (
+                      <button
+                        disabled={modalSelectedCaseIds.size === 0 || modalCreating}
+                        onClick={async () => {
+                          if (!projectId || modalSelectedCaseIds.size === 0) return;
+                          setModalCreating(true);
+                          try {
+                            const selected = newlyGeneratedTestCases.filter(tc => modalSelectedCaseIds.has(tc.id));
+                            let failCount = 0;
+                            for (const tc of selected) {
+                              let desc = `**Categoria:** ${CATEGORY_LABEL[tc.category] || tc.category}\n`;
+                              desc += `**Prioridade:** ${tc.priority.toUpperCase()}\n\n`;
+                              desc += `**Passos de Execução:**\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\n`;
+                              desc += `**Resultado Esperado:**\n${tc.expected_result}`;
+                              try {
+                                const createRes = await fetch("/api/tasks/create", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    project_id: projectId,
+                                    title: `[QA] ${tc.id} — ${tc.title}`,
+                                    description: desc,
+                                    status: "todo",
+                                    priority: tc.priority === "alta" ? "high" : tc.priority === "baixa" ? "low" : "medium",
+                                    metadata: { test_case_id: tc.id, category: tc.category, steps: tc.steps, expected_result: tc.expected_result },
+                                  }),
+                                });
+                                if (!createRes.ok) failCount++;
+                              } catch { failCount++; }
+                            }
+                            if (failCount > 0) throw new Error(`${failCount} tarefa(s) não puderam ser criadas`);
+                            addLog("success", `🎯 ${selected.length} tarefas indexadas com sucesso!`);
+                            setModalSuccess(true);
+                            setTimeout(() => {
+                              setShowNewTestCasesModal(false);
+                              setModalSuccess(false);
+                              if (onGoToTasks) onGoToTasks();
+                            }, 1200);
+                          } catch (err: any) {
+                            addLog("error", `❌ Erro ao criar tarefas: ${err.message}`);
+                            alert("Erro ao criar tarefas: " + err.message);
+                          } finally {
+                            setModalCreating(false);
+                          }
+                        }}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                          modalSelectedCaseIds.size === 0 || modalCreating
+                            ? "opacity-50 cursor-not-allowed bg-primary/40 text-primary-foreground border border-primary/20"
+                            : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/25 hover:shadow-primary/40 active:scale-95"
+                        )}
+                      >
+                        {modalCreating ? (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> Criando tarefas...</>
+                        ) : (
+                          <><CheckSquare className="w-4 h-4" /> Criar {modalSelectedCaseIds.size > 0 ? `${modalSelectedCaseIds.size} ` : ""}e ir para Tarefas</>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ════════════════════════════════════════════════════════════
+          MODAL DE CRIAÇÃO / EDIÇÃO DE CASO DE TESTE (MANUAL OU IA)
+      ════════════════════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showCreateTcModal && (
+          <motion.div
+            key="create-tc-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget) setShowCreateTcModal(false); }}
+          >
+            <motion.div
+              key="create-tc-modal-panel"
+              initial={{ opacity: 0, scale: 0.94, y: 28 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 28 }}
+              transition={{ type: "spring", stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-xl max-h-[92vh] flex flex-col rounded-2xl border border-border bg-background shadow-2xl overflow-hidden"
+              style={{ boxShadow: "0 0 0 1px rgba(99,102,241,0.22), 0 32px 80px rgba(0,0,0,0.6)" }}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-primary/10 via-violet-500/5 to-transparent shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0">
+                    {editingTc ? <Pencil className="w-4 h-4 text-primary" /> : <PlusCircle className="w-4 h-4 text-primary" />}
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-foreground tracking-tight">
+                      {editingTc ? `Editar Caso de Teste (${editingTc.id})` : "Criar Novo Caso de Teste"}
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {editingTc ? "Atualize os passos ou dados do caso de teste" : "Adicione manualmente ou gere com IA"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCreateTcModal(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Mode Tabs (Only when creating, not editing) */}
+              {!editingTc && (
+                <div className="flex border-b border-border bg-muted/20 px-6 pt-2 shrink-0 gap-2">
+                  <button
+                    onClick={() => setTcFormMode("manual")}
+                    className={cn(
+                      "pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5",
+                      tcFormMode === "manual"
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Preenchimento Manual
+                  </button>
+                  <button
+                    onClick={() => setTcFormMode("ai")}
+                    className={cn(
+                      "pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5",
+                      tcFormMode === "ai"
+                        ? "border-violet-500 text-violet-400"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                    Gerar 1 com IA
+                  </button>
+                </div>
+              )}
+
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                {tcFormMode === "ai" && !editingTc ? (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/30 space-y-2">
+                      <div className="flex items-center gap-2 text-violet-400 font-bold text-xs">
+                        <Sparkles className="w-4 h-4" />
+                        Geração Específica com IA
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Descreva o cenário específico que você deseja testar. A IA gerará o título, passos numerados, categoria e resultado esperado.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground">Cenário ou Funcionalidade a Testar</label>
+                      <textarea
+                        value={tcFormAiPrompt}
+                        onChange={(e) => setTcFormAiPrompt(e.target.value)}
+                        placeholder="Ex: Testar validação de e-mail inválido e senha fraca no formulário de cadastro, verificando se as mensagens de erro aparecem em vermelho."
+                        rows={5}
+                        className="w-full bg-black/10 dark:bg-black/30 border border-border rounded-xl p-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors leading-relaxed"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleGenerateSingleTcWithAi}
+                      disabled={generatingSingleTc || !tcFormAiPrompt.trim()}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-md shadow-violet-600/25 disabled:opacity-50 cursor-pointer"
+                    >
+                      {generatingSingleTc ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Gerando caso de teste...</>
+                      ) : (
+                        <><Sparkles className="w-4 h-4" /> Gerar e Preencher Formulário</>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Row 1: ID + Title */}
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="col-span-1 space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground">ID do Caso</label>
+                        <input
+                          type="text"
+                          value={tcFormId}
+                          onChange={(e) => setTcFormId(e.target.value)}
+                          placeholder="TC001"
+                          className="w-full bg-black/10 dark:bg-black/30 border border-border rounded-xl px-3 py-2 text-xs font-mono font-bold text-foreground outline-none focus:border-primary/50"
+                        />
+                      </div>
+                      <div className="col-span-3 space-y-1.5">
+                        <label className="text-xs font-semibold text-foreground">Título do Caso de Teste *</label>
+                        <input
+                          type="text"
+                          value={tcFormTitle}
+                          onChange={(e) => setTcFormTitle(e.target.value)}
+                          placeholder="Ex: Validar login com sucesso usando credenciais válidas"
+                          className="w-full bg-black/10 dark:bg-black/30 border border-border rounded-xl px-3 py-2 text-xs text-foreground outline-none focus:border-primary/50"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 2: Category + Priority */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground">Categoria</label>
+                        <select
+                          value={tcFormCategory}
+                          onChange={(e) => setTcFormCategory(e.target.value as any)}
+                          className="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-foreground outline-none focus:border-primary/50"
+                        >
+                          <option value="happy_path">✅ Happy Path (Fluxo Principal)</option>
+                          <option value="error">❌ Caso de Erro</option>
+                          <option value="edge_case">⚠️ Caso de Borda (Exceção)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground">Prioridade</label>
+                        <select
+                          value={tcFormPriority}
+                          onChange={(e) => setTcFormPriority(e.target.value as any)}
+                          className="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-foreground outline-none focus:border-primary/50"
+                        >
+                          <option value="alta">🔴 Alta</option>
+                          <option value="media">🟡 Média</option>
+                          <option value="baixa">🟢 Baixa</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Steps */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-foreground">Passos de Execução *</label>
+                        <button
+                          type="button"
+                          onClick={() => setTcFormSteps([...tcFormSteps, ""])}
+                          className="text-[11px] text-primary hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" /> Adicionar Passo
+                        </button>
+                      </div>
+
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {tcFormSteps.map((step, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <input
+                              type="text"
+                              value={step}
+                              onChange={(e) => {
+                                const next = [...tcFormSteps];
+                                next[idx] = e.target.value;
+                                setTcFormSteps(next);
+                              }}
+                              placeholder={`Passo ${idx + 1}...`}
+                              className="flex-1 bg-black/10 dark:bg-black/30 border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
+                            />
+                            {tcFormSteps.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setTcFormSteps(tcFormSteps.filter((_, i) => i !== idx))}
+                                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Expected Result */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground">Resultado Esperado *</label>
+                      <textarea
+                        value={tcFormExpectedResult}
+                        onChange={(e) => setTcFormExpectedResult(e.target.value)}
+                        placeholder="Ex: O usuário é autenticado com sucesso e redirecionado para o dashboard."
+                        rows={3}
+                        className="w-full bg-black/10 dark:bg-black/30 border border-border rounded-xl p-3 text-xs text-foreground outline-none focus:border-primary/50 leading-relaxed"
+                      />
+                    </div>
+
+                    {/* Checkbox Create Task */}
+                    {!editingTc && projectId && (
+                      <label className="flex items-center gap-2.5 p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs text-foreground cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={tcFormCreateTask}
+                          onChange={(e) => setTcFormCreateTask(e.target.checked)}
+                          className="w-4 h-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer"
+                        />
+                        <span className="font-medium">
+                          📥 Criar automaticamente como Tarefa na aba <strong>Tarefas</strong>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="shrink-0 px-6 py-4 border-t border-border bg-muted/30 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateTcModal(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:text-foreground border border-border hover:bg-accent transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                {tcFormMode === "manual" && (
+                  <button
+                    type="button"
+                    disabled={savingTc || !tcFormTitle.trim() || !tcFormExpectedResult.trim()}
+                    onClick={handleSaveCustomTc}
+                    className="flex items-center gap-2 px-5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all shadow-md shadow-primary/25 disabled:opacity-50 cursor-pointer active:scale-95"
+                  >
+                    {savingTc ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...</>
+                    ) : (
+                      <><Check className="w-3.5 h-3.5" /> {editingTc ? "Atualizar Caso" : "Salvar Caso de Teste"}</>
+                    )}
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
+

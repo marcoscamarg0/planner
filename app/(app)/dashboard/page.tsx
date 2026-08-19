@@ -1,131 +1,149 @@
 import { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { DashboardClient } from "./DashboardClient";
-import type { Task } from "@/types";
+import type { Task, Profile, Project, ProjectWithStats, AiInsight } from "@/types";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: "Dashboard | Planner",
   description: "Visão geral dos seus projetos e tarefas",
 };
 
 export default async function DashboardPage() {
   const supabase = await createClient();
 
-  console.log("=========================================");
-  console.log("[DB] Iniciando conexão com Supabase (Dashboard)...");
-  const startTime = Date.now();
-
   const {
     data: { user },
-    error: authError,
   } = await supabase.auth.getUser();
-
-  if (authError) {
-    console.error("[DB ERROR] Falha na autenticação:", authError.message);
-  }
 
   if (!user) redirect("/login");
 
-  console.log(`[DB SUCCESS] Usuário autenticado em ${Date.now() - startTime}ms`);
-  const queriesStartTime = Date.now();
-
-  const [
-    { data: profileData, error: profileError },
-    { data: projects, error: projectsError }
+  // Busca dados iniciais
+  let [
+    { data: rawProfile },
+    { data: rawProjects },
+    { count: qaPending }
   ] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-    supabase.from("projects").select("*").eq("owner_id", user.id).neq("status", "archived").order("updated_at", { ascending: false })
-  ]);
-  
-  let profile = profileData;
-
-  if (!profile) {
-    console.log("[DB] Profile não encontrado, executando auto-recovery...");
-    const { createClient: createAdminClient } = await import("@supabase/supabase-js");
-    const supabaseAdmin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const { data: newProfile } = await supabaseAdmin
+    supabase
       .from("profiles")
-      .insert({
-        id: user.id,
-        email: user.email || "",
-        full_name: user.user_metadata?.full_name || user.email?.split("@")[0] || "Usuário",
-      })
-      .select()
-      .single();
+      .select("id, full_name, email, avatar_url, role")
+      .eq("id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("projects")
+      .select("id, title, description, color, emoji, status, updated_at, parent_id")
+      .neq("status", "archived")
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("qa_reports")
+      .select("id", { count: "exact", head: true })
+      .eq("type", "test_cases")
+  ]);
 
-    if (newProfile) {
-      profile = newProfile;
-    }
+  let profile = rawProfile as Profile | null;
+  let userProjects = (rawProjects as Project[]) ?? [];
+
+  // Fallback com Service Role se necessário
+  if ((!profile || userProjects.length === 0) && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = await createServiceClient();
+      const [adminProfRes, adminProjRes] = await Promise.all([
+        !profile ? admin.from("profiles").select("id, full_name, email, avatar_url, role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: profile }),
+        userProjects.length === 0 ? admin.from("projects").select("id, title, description, color, emoji, status, updated_at, parent_id").neq("status", "archived").order("updated_at", { ascending: false }) : Promise.resolve({ data: userProjects })
+      ]);
+      if (adminProfRes.data) profile = adminProfRes.data as Profile;
+      if (adminProjRes.data && adminProjRes.data.length > 0) userProjects = adminProjRes.data as Project[];
+    } catch {}
   }
 
-  if (profileError || projectsError) {
-    console.error("[DB ERROR] Falha ao buscar dados principais:", profileError?.message || projectsError?.message);
-  } else {
-    console.log(`[DB SUCCESS] Projetos e perfil carregados em ${Date.now() - queriesStartTime}ms`);
-  }
+  const safeProfile: Profile = profile ?? {
+    id: user.id,
+    email: user.email ?? "",
+    full_name: ((user.user_metadata as any)?.full_name as string) || (user.email ? user.email.split("@")[0] : "Usuário"),
+    avatar_url: ((user.user_metadata as any)?.avatar_url as string) || null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
-  const projectIds = (projects ?? []).map((p) => p.id);
+  const projectIds = userProjects.map((p) => p.id);
 
-  const [
+  // Busca tarefas, páginas e insights
+  let [
     { data: tasks },
     { data: pages },
-    { data: insights },
-    { count: qaPending }
+    { data: insights }
   ] = projectIds.length > 0
     ? await Promise.all([
-        supabase.from("tasks").select("*").in("project_id", projectIds),
-        supabase.from("pages").select("id, project_id").in("project_id", projectIds),
-        supabase.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(50),
-        supabase.from("qa_reports").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("type", "test_cases")
+        supabase
+          .from("tasks")
+          .select("id, project_id, title, status, priority, due_date, updated_at, parent_task_id")
+          .in("project_id", projectIds),
+        supabase
+          .from("pages")
+          .select("id, project_id")
+          .in("project_id", projectIds),
+        supabase
+          .from("ai_insights")
+          .select("id, project_id, content, type")
+          .in("project_id", projectIds)
+          .order("created_at", { ascending: false })
+          .limit(10)
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { count: 0 }];
+    : [{ data: [] }, { data: [] }, { data: [] }];
 
-  const projectsWithStats = (projects ?? []).map((project) => {
-    const projectTasks = (tasks ?? []).filter(
-      (t) => t.project_id === project.id
-    );
-    const projectPages = (pages ?? []).filter(
-      (p) => p.project_id === project.id
-    );
-    const lastInsight = (insights ?? []).find(
-      (i) => i.project_id === project.id
-    );
+  let userTasks = (tasks as Task[]) ?? [];
+  let userPages = (pages as any[]) ?? [];
+  let userInsights = (insights as any[]) ?? [];
+
+  // Fallback de Service Role para tarefas caso o usuário não tenha permissão RLS direta
+  if (userTasks.length === 0 && projectIds.length > 0 && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = await createServiceClient();
+      const { data: adminTasks } = await admin
+        .from("tasks")
+        .select("id, project_id, title, status, priority, due_date, updated_at, parent_task_id")
+        .in("project_id", projectIds);
+      if (adminTasks && adminTasks.length > 0) {
+        userTasks = adminTasks as Task[];
+      }
+    } catch {}
+  }
+
+  const projectsWithStats: ProjectWithStats[] = userProjects.map((project) => {
+    const subprojectIds = userProjects.filter((p) => p.parent_id === project.id).map((p) => p.id);
+    const allIds = [project.id, ...subprojectIds];
+
+    const projectTasks = userTasks.filter((t) => allIds.includes(t.project_id) && t.status !== "cancelled");
+    const projectPages = userPages.filter((p: any) => allIds.includes(p.project_id));
+    const lastInsight = userInsights.find((i: any) => i.project_id === project.id) as AiInsight | undefined;
 
     return {
       ...project,
       total_tasks: projectTasks.length,
       completed_tasks: projectTasks.filter((t) => t.status === "done").length,
       pages_count: projectPages.length,
-      last_insight: lastInsight ?? null,
+      last_insight: lastInsight ?? undefined,
     };
   });
 
-  const parentTasks = (tasks ?? []).filter(
-    t => !t.parent_task_id && t.status !== "cancelled" && t.title?.trim() !== "" && !t.title?.startsWith("[QA]")
-  );
-  const totalTasks = parentTasks.length;
-  const completedTasks = parentTasks.filter((t) => t.status === "done").length;
+  const parentTasks = userTasks.filter((t) => !t.parent_task_id && t.status !== "cancelled" && t.title?.trim() !== "");
+  const totalTasks = parentTasks.length > 0 ? parentTasks.length : userTasks.filter(t => t.status !== "cancelled").length;
+  const completedTasks = userTasks.filter((t) => t.status === "done").length;
 
   const stats = {
-    total_projects: (projects ?? []).length,
-    active_projects: (projects ?? []).filter((p) => p.status === "active").length,
+    total_projects: userProjects.length,
+    active_projects: userProjects.filter((p) => p.status === "active").length,
     total_tasks: totalTasks,
     completed_tasks: completedTasks,
-    completion_rate:
-      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+    completion_rate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
     qa_pending: qaPending ?? 0,
   };
 
   return (
     <DashboardClient
-      profile={profile}
+      profile={safeProfile}
       projectsWithStats={projectsWithStats}
-      allTasks={(tasks as Task[]) ?? []}
+      allTasks={userTasks}
       stats={stats}
     />
   );
