@@ -595,7 +595,7 @@ export function createAppwriteClient(sessionToken?: string | null) {
                 user: {
                   id: u.$id,
                   email: u.email,
-                  user_metadata: { full_name: u.name },
+                  user_metadata: { full_name: u.name, avatar_url: null as string | null },
                 },
               },
               error: null,
@@ -609,7 +609,7 @@ export function createAppwriteClient(sessionToken?: string | null) {
           user: {
             id: "appwrite_admin_user",
             email: "admin@transportes.gov.br",
-            user_metadata: { full_name: "Administrador MT" },
+            user_metadata: { full_name: "Administrador MT", avatar_url: null as string | null },
           },
         },
         error: null,

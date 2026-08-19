@@ -56,8 +56,8 @@ export default async function AppLayout({
   const safeProfile: Profile = profile ?? {
     id: user.id,
     email: user.email ?? "",
-    full_name: (user.user_metadata?.full_name as string) || (user.email ? user.email.split("@")[0] : "Usuário"),
-    avatar_url: (user.user_metadata?.avatar_url as string) || null,
+    full_name: ((user.user_metadata as any)?.full_name as string) || (user.email ? user.email.split("@")[0] : "Usuário"),
+    avatar_url: ((user.user_metadata as any)?.avatar_url as string) || null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

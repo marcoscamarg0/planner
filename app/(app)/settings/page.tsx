@@ -27,7 +27,7 @@ export default async function SettingsPage() {
       .insert({
         id: user.id,
         email: user.email,
-        full_name: user.user_metadata?.full_name || user.email?.split("@")[0] || "Usuário",
+        full_name: (user.user_metadata as any)?.full_name || user.email?.split("@")[0] || "Usuário",
       })
       .select()
       .single();
