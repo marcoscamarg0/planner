@@ -298,14 +298,14 @@ export function createAppwriteClient(sessionToken?: string | null) {
       },
 
       update(data: any) {
-        const updateFilters: Array<{ field: string; value: any }> = [];
+        const updateFilters: Array<{ field: string; op?: string; value: any }> = [];
 
         const performUpdate = async () => {
           const payload = await sanitizePayload(data);
 
           try {
-            const idFilter = updateFilters.find((f) => f.field === "id" || f.field === "$id");
-            if (idFilter) {
+            const idFilter = updateFilters.find((f) => (f.field === "id" || f.field === "$id") && (!f.op || f.op === "eq"));
+            if (idFilter && typeof idFilter.value === "string") {
               if (typeof window !== "undefined") {
                 const res = await callMutationProxy({
                   action: "update",
@@ -315,8 +315,17 @@ export function createAppwriteClient(sessionToken?: string | null) {
                 });
                 return { data: [res.data], error: null };
               } else {
-                const updated = await appwriteRest.updateDocument(dbId, state.table, idFilter.value, payload);
-                return { data: [{ ...updated, id: updated.$id }], error: null };
+                try {
+                  const updated = await appwriteRest.updateDocument(dbId, state.table, idFilter.value, payload);
+                  return { data: [{ ...updated, id: updated.$id }], error: null };
+                } catch {
+                  const list = await appwriteRest.listDocuments(dbId, state.table);
+                  const match = (list.documents || []).find((d: any) => d.$id === idFilter.value || d.id === idFilter.value);
+                  if (match) {
+                    const updated = await appwriteRest.updateDocument(dbId, state.table, match.$id, payload);
+                    return { data: [{ ...updated, id: updated.$id }], error: null };
+                  }
+                }
               }
             }
 
@@ -326,8 +335,13 @@ export function createAppwriteClient(sessionToken?: string | null) {
 
             let docs: any[] = Array.isArray(list) ? list : [];
             for (const f of updateFilters) {
-              docs = docs.filter((d) => d[f.field] === f.value || d.$id === f.value || d.id === f.value);
+              if (f.op === "in" && Array.isArray(f.value)) {
+                docs = docs.filter((d) => f.value.includes(d[f.field]) || f.value.includes(d.$id) || f.value.includes(d.id));
+              } else {
+                docs = docs.filter((d) => d[f.field] === f.value || d.$id === f.value || d.id === f.value);
+              }
             }
+
             const updatedDocs = [];
             for (const d of docs) {
               const targetId = d.$id || d.id;
@@ -352,10 +366,11 @@ export function createAppwriteClient(sessionToken?: string | null) {
 
         const updateBuilder: any = {
           eq(field: string, value: any) {
-            updateFilters.push({ field, value });
+            updateFilters.push({ field, op: "eq", value });
             return updateBuilder;
           },
           in(field: string, values: any[]) {
+            updateFilters.push({ field, op: "in", value: values });
             return updateBuilder;
           },
           select(fields?: string) {
@@ -378,12 +393,12 @@ export function createAppwriteClient(sessionToken?: string | null) {
       },
 
       delete() {
-        const deleteFilters: Array<{ field: string; value: any }> = [];
+        const deleteFilters: Array<{ field: string; op?: string; value: any }> = [];
 
         const performDelete = async () => {
           try {
-            const idFilter = deleteFilters.find((f) => f.field === "id" || f.field === "$id");
-            if (idFilter) {
+            const idFilter = deleteFilters.find((f) => (f.field === "id" || f.field === "$id") && (!f.op || f.op === "eq"));
+            if (idFilter && typeof idFilter.value === "string") {
               if (typeof window !== "undefined") {
                 await callMutationProxy({
                   action: "delete",
@@ -391,7 +406,15 @@ export function createAppwriteClient(sessionToken?: string | null) {
                   documentId: idFilter.value,
                 });
               } else {
-                await appwriteRest.deleteDocument(dbId, state.table, idFilter.value);
+                try {
+                  await appwriteRest.deleteDocument(dbId, state.table, idFilter.value);
+                } catch {
+                  const list = await appwriteRest.listDocuments(dbId, state.table);
+                  const match = (list.documents || []).find((d: any) => d.$id === idFilter.value || d.id === idFilter.value);
+                  if (match) {
+                    await appwriteRest.deleteDocument(dbId, state.table, match.$id);
+                  }
+                }
               }
               return { data: null, error: null };
             }
@@ -402,8 +425,13 @@ export function createAppwriteClient(sessionToken?: string | null) {
 
             let docs: any[] = Array.isArray(list) ? list : [];
             for (const f of deleteFilters) {
-              docs = docs.filter((d) => d[f.field] === f.value || d.$id === f.value || d.id === f.value);
+              if (f.op === "in" && Array.isArray(f.value)) {
+                docs = docs.filter((d) => f.value.includes(d[f.field]) || f.value.includes(d.$id) || f.value.includes(d.id));
+              } else {
+                docs = docs.filter((d) => d[f.field] === f.value || d.$id === f.value || d.id === f.value);
+              }
             }
+
             for (const d of docs) {
               const targetId = d.$id || d.id;
               if (typeof window !== "undefined") {
@@ -424,10 +452,11 @@ export function createAppwriteClient(sessionToken?: string | null) {
 
         const deleteBuilder: any = {
           eq(field: string, value: any) {
-            deleteFilters.push({ field, value });
+            deleteFilters.push({ field, op: "eq", value });
             return deleteBuilder;
           },
           in(field: string, values: any[]) {
+            deleteFilters.push({ field, op: "in", value: values });
             return deleteBuilder;
           },
           select(fields?: string) {
@@ -450,7 +479,17 @@ export function createAppwriteClient(sessionToken?: string | null) {
         fetchDocs
           .then(async (res: any) => {
             let docs: any[] = (res.documents || []).map((d: any) => {
-              const mapped = { ...d, id: d.$id };
+              let parentId = d.parent_id || d.parentId || null;
+              if (parentId === "null" || parentId === "undefined" || parentId === "" || parentId === "none") {
+                parentId = null;
+              }
+              const mapped = {
+                ...d,
+                id: d.$id || d.id,
+                project_id: d.project_id || d.projectId,
+                parent_id: parentId,
+                status: d.status !== undefined && d.status !== null && d.status !== "" ? d.status : (state.table === appwriteConfig.collections.tasks ? "todo" : "active"),
+              };
               if (typeof mapped.flow_data === "string") {
                 try {
                   mapped.flow_data = JSON.parse(mapped.flow_data);
@@ -575,6 +614,20 @@ export function createAppwriteClient(sessionToken?: string | null) {
   // Auth Helper
   const auth = {
     async getUser() {
+      // 1. No navegador, busca a sessão real via /api/auth/me
+      if (typeof window !== "undefined") {
+        try {
+          const res = await fetch("/api/auth/me", { cache: "no-store" });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.user) {
+              return { data: { user: json.user }, error: null };
+            }
+          }
+        } catch {}
+      }
+
+      // 2. No servidor, se tiver token de sessão, consulta o Appwrite diretamente
       if (sessionToken) {
         try {
           const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || appwriteConfig.endpoint;
@@ -590,12 +643,13 @@ export function createAppwriteClient(sessionToken?: string | null) {
 
           if (res.ok) {
             const u = await res.json();
+            const fullName = u.name || (u.email ? u.email.split("@")[0] : "Usuário");
             return {
               data: {
                 user: {
                   id: u.$id,
                   email: u.email,
-                  user_metadata: { full_name: u.name, avatar_url: null as string | null },
+                  user_metadata: { full_name: fullName, avatar_url: null as string | null },
                 },
               },
               error: null,
@@ -607,9 +661,9 @@ export function createAppwriteClient(sessionToken?: string | null) {
       return {
         data: {
           user: {
-            id: "appwrite_admin_user",
-            email: "admin@transportes.gov.br",
-            user_metadata: { full_name: "Administrador MT", avatar_url: null as string | null },
+            id: "appwrite_user",
+            email: "marcos@transportes.gov.br",
+            user_metadata: { full_name: "Marcos Camargo", avatar_url: null as string | null },
           },
         },
         error: null,

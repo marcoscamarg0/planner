@@ -24,11 +24,13 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project, subProjects = [], index = 0, currentUserId, isSelected, onToggleSelect }: ProjectCardProps) {
   const progressRate =
-    project.total_tasks > 0
+    project.status === "completed"
+      ? 100
+      : project.total_tasks > 0
       ? Math.round((project.completed_tasks / project.total_tasks) * 100)
       : 0;
 
-  const progressColor = getProgressColor(progressRate);
+  const progressColor = progressRate > 0 ? (project.color || getProgressColor(progressRate)) : "#94a3b8";
   const router = useRouter();
   const supabase = createClient();
   const [shareOpen, setShareOpen] = useState(false);

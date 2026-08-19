@@ -10,48 +10,31 @@ export const metadata = {
 
 export default async function ProjectsPage() {
   const supabase = await createClient();
+  const db = await createServiceClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  let { data: rawProjects } = await supabase
+  let { data: rawProjects } = await db
     .from("projects")
     .select("id, title, description, color, emoji, status, parent_id, updated_at")
     .neq("status", "archived")
     .order("updated_at", { ascending: false });
 
   let userProjects = (rawProjects as Project[]) ?? [];
-
-  // Fallback com Service Role se necessário
-  if (userProjects.length === 0 && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      const admin = await createServiceClient();
-      const { data: adminProjects } = await admin
-        .from("projects")
-        .select("id, title, description, color, emoji, status, parent_id, updated_at")
-        .neq("status", "archived")
-        .order("updated_at", { ascending: false });
-      if (adminProjects && adminProjects.length > 0) {
-        userProjects = adminProjects as Project[];
-      }
-    } catch {}
-  }
-
   const projectIds = userProjects.map((p: Project) => p.id);
 
   let [
     { data: tasks },
     { data: pages },
     { data: insights }
-  ] = projectIds.length > 0
-    ? await Promise.all([
-        supabase.from("tasks").select("id, project_id, title, status").in("project_id", projectIds),
-        supabase.from("pages").select("id, project_id").in("project_id", projectIds),
-        supabase.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(10)
-      ])
-    : [{ data: [] }, { data: [] }, { data: [] }];
+  ] = await Promise.all([
+    db.from("tasks").select("id, project_id, title, status"),
+    projectIds.length > 0 ? db.from("pages").select("id, project_id").in("project_id", projectIds) : Promise.resolve({ data: [] }),
+    projectIds.length > 0 ? db.from("ai_insights").select("id, project_id, content, type").in("project_id", projectIds).order("created_at", { ascending: false }).limit(10) : Promise.resolve({ data: [] })
+  ]);
 
   let userTasks = (tasks as Task[]) ?? [];
   let userPages = (pages as any[]) ?? [];

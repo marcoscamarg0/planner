@@ -24,6 +24,7 @@ import {
   Circle,
   FileText,
   TrendingUp,
+  CornerDownRight,
 } from "lucide-react";
 import type { Profile, ProjectWithStats, Task, DashboardStats } from "@/types";
 import { formatDistanceToNow } from "date-fns";
@@ -136,12 +137,39 @@ export function DashboardClient({
     }
   }, [flash]);
 
-  // Periodic polling every 12s to catch updates in real time
+  // ── Polling & Auto-Refresh totalmente automático em tempo real ──
   useEffect(() => {
+    // 1. Polling a cada 15 segundos (apenas se a aba estiver ativa)
     const interval = setInterval(() => {
-      refreshDashboardData(false);
-    }, 12000);
-    return () => clearInterval(interval);
+      if (document.visibilityState === "visible") {
+        refreshDashboardData(false);
+      }
+    }, 15000);
+
+    // 2. Atualização imediata ao focar na janela ou mudar de aba
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === "visible") {
+        refreshDashboardData(false);
+      }
+    };
+
+    // 3. Atualização instantânea ao marcar tarefas em outra aba
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "planner_tasks_updated" || !e.key) {
+        refreshDashboardData(false);
+      }
+    };
+
+    window.addEventListener("focus", handleFocusOrVisible);
+    document.addEventListener("visibilitychange", handleFocusOrVisible);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocusOrVisible);
+      document.removeEventListener("visibilitychange", handleFocusOrVisible);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, [refreshDashboardData]);
 
   // ── AI Insight (once on mount) ──────────────
@@ -252,7 +280,9 @@ export function DashboardClient({
   // Projects with dynamically recomputed stats from live tasks state
   const computedProjects = useMemo(() => {
     return projects.map((p) => {
-      const pTasks = validTasks.filter((t) => t.project_id === p.id);
+      const subIds = projects.filter((sub) => sub.parent_id === p.id).map((sub) => sub.id);
+      const targetIds = [p.id, ...subIds];
+      const pTasks = validTasks.filter((t) => targetIds.includes(t.project_id));
       const total = pTasks.length;
       const completed = pTasks.filter((t) => t.status === "done").length;
       const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -264,6 +294,17 @@ export function DashboardClient({
       };
     });
   }, [projects, validTasks]);
+
+  const isSubproject = (p: ProjectWithStats, all: ProjectWithStats[]) => {
+    if (!p.parent_id) return false;
+    if (p.parent_id === "null" || p.parent_id === "undefined" || p.parent_id === "" || p.parent_id === "none") return false;
+    return all.some((other) => other.id === p.parent_id);
+  };
+
+  // Apenas projetos principais aparecem no grid superior
+  const rootProjects = useMemo(() => {
+    return computedProjects.filter((p) => !isSubproject(p, computedProjects));
+  }, [computedProjects]);
 
   // Filtered tasks list for the tasks card
   const filteredTasks = useMemo(() => {
@@ -320,13 +361,29 @@ export function DashboardClient({
     return feed.slice(0, 12);
   }, [tasks, projects]);
 
+  const [userName, setUserName] = useState(profile?.full_name ?? "");
+
+  useEffect(() => {
+    // Se o nome for o padrão ou contiver Administrador, busca o perfil real em /api/auth/me
+    if (!userName || userName.toLowerCase().includes("administrador") || userName === "Usuário") {
+      fetch("/api/auth/me")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.user?.user_metadata?.full_name) {
+            setUserName(data.user.user_metadata.full_name);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [userName]);
+
   const greeting = () => {
     const h = new Date().getHours();
     if (h < 12) return "Bom dia";
     if (h < 18) return "Boa tarde";
     return "Boa noite";
   };
-  const firstName = profile?.full_name?.split(" ")[0] ?? "Usuário";
+  const firstName = userName ? userName.split(" ")[0] : "Marcos";
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-10 space-y-10">
@@ -383,7 +440,7 @@ export function DashboardClient({
 
       {/* ── Stat Cards ── */}
       <section>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {/* Projetos Ativos */}
           <Link
             href="/projects"
@@ -452,27 +509,6 @@ export function DashboardClient({
               </div>
             </div>
           </div>
-
-          {/* Planos de QA */}
-          <button
-            onClick={openTestPanel}
-            className="flex flex-col justify-between p-4 sm:p-5 rounded-2xl border border-border/80 bg-card hover:border-indigo-500/40 hover:shadow-md transition-all text-left group relative cursor-pointer"
-          >
-            <div className="flex items-center justify-between w-full">
-              <span className="text-xs text-muted-foreground font-semibold">Planos de QA</span>
-              <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <FlaskConical className="w-4.5 h-4.5" />
-              </div>
-            </div>
-            <div className="mt-4 flex items-baseline justify-between w-full">
-              <span className="text-2xl sm:text-3xl font-extrabold text-foreground font-heading">
-                {initialStats.qa_pending}
-              </span>
-              <span className="text-[11px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                Ver planos <ChevronRight className="w-3.5 h-3.5" />
-              </span>
-            </div>
-          </button>
         </div>
       </section>
 
@@ -482,7 +518,7 @@ export function DashboardClient({
           <div className="flex items-center gap-2">
             <FolderKanban className="w-4 h-4 text-primary" />
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
-              Progresso dos Projetos ({computedProjects.length})
+              Progresso dos Projetos ({rootProjects.length})
             </h2>
           </div>
           <Link
@@ -493,7 +529,7 @@ export function DashboardClient({
           </Link>
         </div>
 
-        {computedProjects.length === 0 ? (
+        {rootProjects.length === 0 ? (
           <div className="p-8 rounded-2xl border border-dashed border-border text-center space-y-3 bg-card/40">
             <FolderKanban className="w-10 h-10 text-muted-foreground/40 mx-auto" />
             <p className="text-sm font-semibold text-foreground">Nenhum projeto encontrado</p>
@@ -509,16 +545,21 @@ export function DashboardClient({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {computedProjects.map((p) => {
-              const rate = p.completion_rate || 0;
+            {rootProjects.map((p) => {
+              const subProjects = computedProjects.filter((sp) => sp.parent_id === p.id);
+              const allIds = [p.id, ...subProjects.map((sp) => sp.id)];
+              const allPTasks = validTasks.filter((t) => allIds.includes(t.project_id));
+              const total = allPTasks.length;
+              const completed = allPTasks.filter((t) => t.status === "done").length;
+              const rate = p.status === "completed" ? 100 : (total > 0 ? Math.round((completed / total) * 100) : 0);
+
               return (
-                <Link
+                <div
                   key={p.id}
-                  href={`/projects/${p.id}`}
                   className="group block p-5 rounded-2xl border border-border/80 bg-card hover:border-primary/50 hover:shadow-lg transition-all duration-200"
                 >
                   <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                    <Link href={`/projects/${p.id}`} className="flex items-center gap-3 min-w-0 flex-1">
                       <div
                         className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 shadow-sm"
                         style={{ backgroundColor: `${p.color || "#6366f1"}20`, border: `1px solid ${p.color || "#6366f1"}40` }}
@@ -533,8 +574,10 @@ export function DashboardClient({
                           {p.status === "active" ? "🟢 Ativo" : p.status === "completed" ? "✅ Concluído" : "🟡 Planejamento"}
                         </span>
                       </div>
-                    </div>
-                    <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                    </Link>
+                    <Link href={`/projects/${p.id}`}>
+                      <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                    </Link>
                   </div>
 
                   {p.description && (
@@ -546,7 +589,7 @@ export function DashboardClient({
                   {/* Progress bar */}
                   <div className="space-y-1.5 pt-2 border-t border-border/40">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-[11px] font-semibold text-muted-foreground">Progresso</span>
+                      <span className="text-[11px] font-semibold text-muted-foreground">Progresso Geral</span>
                       <span className="font-bold text-foreground">{rate}%</span>
                     </div>
                     <div className="h-2 rounded-full bg-border overflow-hidden">
@@ -560,14 +603,69 @@ export function DashboardClient({
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
                       <span>
-                        <strong>{p.completed_tasks}</strong> de <strong>{p.total_tasks}</strong> tarefas
+                        <strong>{completed}</strong> de <strong>{total}</strong> tarefas
                       </span>
                       {p.pages_count !== undefined && p.pages_count > 0 && (
                         <span>{p.pages_count} docs</span>
                       )}
                     </div>
                   </div>
-                </Link>
+
+                  {/* Subprojetos Aninhados */}
+                  {subProjects.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-border/50 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                        <span className="flex items-center gap-1 text-primary">
+                          <CornerDownRight className="w-3 h-3" /> Subprojetos ({subProjects.length})
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {subProjects.map((sp) => {
+                          const spTasks = validTasks.filter((t) => t.project_id === sp.id);
+                          const spTotal = spTasks.length;
+                          const spCompleted = spTasks.filter((t) => t.status === "done").length;
+                          const spRate = sp.status === "completed"
+                            ? 100
+                            : (spTotal > 0 ? Math.round((spCompleted / spTotal) * 100) : 0);
+
+                          return (
+                            <Link
+                              key={sp.id}
+                              href={`/projects/${sp.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-between p-2 rounded-xl bg-accent/40 hover:bg-accent/80 transition-colors border border-border/40 group/sub"
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-xs">{sp.emoji || "📁"}</span>
+                                <span className="text-xs font-semibold text-foreground truncate group-hover/sub:text-primary transition-colors">
+                                  {sp.title}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-[10px] font-medium text-muted-foreground">
+                                  {spCompleted}/{spTotal}
+                                </span>
+                                <div className="w-12 h-1.5 bg-border rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full transition-all duration-300"
+                                    style={{
+                                      width: `${spRate}%`,
+                                      backgroundColor: sp.color || "#6366f1",
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-[10px] font-bold text-foreground w-6 text-right">
+                                  {spRate}%
+                                </span>
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -636,7 +734,7 @@ export function DashboardClient({
                 </p>
               </div>
             ) : (
-              filteredTasks.slice(0, 15).map((t) => {
+              filteredTasks.slice(0, 50).map((t) => {
                 const isDone = t.status === "done";
                 const isToggling = togglingTaskId === t.id;
                 const proj = projectMap.get(t.project_id);

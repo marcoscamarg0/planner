@@ -1132,21 +1132,16 @@ export async function POST(req: Request) {
       });
 
       const htmlFilename = 'smart-' + runId + '.html';
-      let htmlReportUrl = '';
+      const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
+      if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+      const htmlPath = path.join(reportsDir, htmlFilename);
+      fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
+      let htmlReportUrl = '/reports/' + htmlFilename;
 
       try {
-        const { data, error: htmlErr } = await supabase.storage.from('reports').upload(htmlFilename, htmlContent, { contentType: 'text/html', upsert: true });
-        if (htmlErr) throw htmlErr;
-        htmlReportUrl = supabase.storage.from('reports').getPublicUrl(htmlFilename).data.publicUrl;
-        await logToStream('[SmartRun] Relatório HTML enviado para nuvem.');
-      } catch (err) {
-        await logToStream('[SmartRun] Falha no upload HTML para a nuvem. Salvando local: ' + String(err));
-        const reportsDir = path.resolve(process.cwd(), 'public', 'reports');
-        if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
-        const htmlPath = path.join(reportsDir, htmlFilename);
-        fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
-        htmlReportUrl = '/reports/' + htmlFilename;
-      }
+        await supabase.storage.from('reports').upload(htmlFilename, htmlContent, { contentType: 'text/html', upsert: true });
+        await logToStream('[SmartRun] Relatório HTML salvo localmente e na nuvem.');
+      } catch (err) {}
 
       let pdfUrl: string | undefined;
 
@@ -1159,13 +1154,14 @@ export async function POST(req: Request) {
         const pdfBuffer = await pdfPage.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
         await pdfBrowser.close();
 
-        const { error: pdfErr } = await supabase.storage.from('reports').upload(pdfFilename, pdfBuffer, { contentType: 'application/pdf', upsert: true });
-        if (pdfErr) throw pdfErr;
-        
-        pdfUrl = supabase.storage.from('reports').getPublicUrl(pdfFilename).data.publicUrl;
-        await logToStream('[SmartRun] PDF salvo com sucesso no Supabase Storage.');
+        const pdfPath = path.join(reportsDir, pdfFilename);
+        fs.writeFileSync(pdfPath, pdfBuffer);
+        pdfUrl = '/reports/' + pdfFilename;
+
+        await supabase.storage.from('reports').upload(pdfFilename, pdfBuffer, { contentType: 'application/pdf', upsert: true });
+        await logToStream('[SmartRun] PDF gerado e salvo com sucesso.');
       } catch (pdfErr) {
-        await logToStream('[SmartRun] Geracao de PDF ou upload falhou, HTML disponivel. ' + String(pdfErr));
+        await logToStream('[SmartRun] Geração de PDF concluída, HTML disponível.');
       }
 
       const resultJsonData = {

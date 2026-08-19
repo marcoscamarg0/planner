@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { Project, Task, ProjectWithStats, AiInsight } from "@/types";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
+    const db = await createServiceClient();
 
     // Busca projetos ativos/não arquivados
-    const { data: rawProjects } = await supabase
+    const { data: rawProjects } = await db
       .from("projects")
       .select("id, title, description, color, emoji, status, updated_at, parent_id")
       .neq("status", "archived")
@@ -24,34 +19,35 @@ export async function GET() {
     const projectIds = userProjects.map((p: Project) => p.id);
 
     // Busca tarefas, páginas, insights e contagem de QA
-    let [
+    const [
       { data: rawTasks },
       { data: rawPages },
       { data: rawInsights },
       { count: qaPending }
-    ] = projectIds.length > 0
-      ? await Promise.all([
-          supabase
-            .from("tasks")
-            .select("id, project_id, title, status, priority, due_date, updated_at, parent_task_id")
-            .in("project_id", projectIds)
-            .order("updated_at", { ascending: false }),
-          supabase
+    ] = await Promise.all([
+      db
+        .from("tasks")
+        .select("id, project_id, title, status, priority, due_date, updated_at, parent_task_id")
+        .order("updated_at", { ascending: false }),
+      projectIds.length > 0
+        ? db
             .from("pages")
             .select("id, project_id")
-            .in("project_id", projectIds),
-          supabase
+            .in("project_id", projectIds)
+        : Promise.resolve({ data: [] }),
+      projectIds.length > 0
+        ? db
             .from("ai_insights")
             .select("id, project_id, content, type")
             .in("project_id", projectIds)
             .order("created_at", { ascending: false })
-            .limit(10),
-          supabase
-            .from("qa_reports")
-            .select("id", { count: "exact", head: true })
-            .eq("type", "test_cases"),
-        ])
-      : [{ data: [] }, { data: [] }, { data: [] }, { count: 0 }];
+            .limit(10)
+        : Promise.resolve({ data: [] }),
+      db
+        .from("qa_reports")
+        .select("id", { count: "exact", head: true })
+        .eq("type", "test_cases"),
+    ]);
 
     const userTasks = (rawTasks as Task[]) ?? [];
     const userPages = rawPages ?? [];

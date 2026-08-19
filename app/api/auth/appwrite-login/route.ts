@@ -42,11 +42,27 @@ export async function POST(req: Request) {
       expires: new Date(sessionData.expire),
     });
 
+    // 3. Busca detalhes da conta para obter o nome real
+    let userName = email.split("@")[0];
+    try {
+      const accRes = await fetch(`${endpoint}/account`, {
+        headers: {
+          "X-Appwrite-Project": projectId,
+          "X-Appwrite-Session": sessionData.secret,
+        },
+      });
+      if (accRes.ok) {
+        const accData = await accRes.json();
+        if (accData.name) userName = accData.name;
+      }
+    } catch {}
+
     return NextResponse.json({
       success: true,
       user: {
         id: sessionData.userId,
         email,
+        name: userName,
       },
     });
   } catch (err: any) {

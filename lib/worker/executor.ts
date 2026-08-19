@@ -375,6 +375,14 @@ export async function executeAutomation(
 
     await context.close();
 
+    // Limpeza automática de relatórios gerados há mais de 3 dias
+    try {
+      const { cleanOldReports } = require('../utils/cleanup-reports');
+      await cleanOldReports(3);
+    } catch (cleanErr) {
+      console.warn('[Executor] Falha na rotina de limpeza de 3 dias:', cleanErr);
+    }
+
     const approved = results.filter(r => r.status === 'aprovado').length;
     const failed   = results.filter(r => r.status !== 'aprovado' && r.status !== 'pulado').length;
 

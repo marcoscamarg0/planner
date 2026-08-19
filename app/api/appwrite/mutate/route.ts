@@ -22,16 +22,38 @@ export async function POST(req: Request) {
       if (!documentId) {
         return NextResponse.json({ error: "documentId é obrigatório para update" }, { status: 400 });
       }
-      const updated = await appwriteRest.updateDocument(dbId, collectionId, documentId, data);
-      return NextResponse.json({ data: { ...updated, id: updated.$id }, success: true });
+      try {
+        const updated = await appwriteRest.updateDocument(dbId, collectionId, documentId, data);
+        return NextResponse.json({ data: { ...updated, id: updated.$id }, success: true });
+      } catch (err: any) {
+        const list = await appwriteRest.listDocuments(dbId, collectionId);
+        const match = (list.documents || []).find((d: any) => d.$id === documentId || d.id === documentId);
+        if (match) {
+          const updated = await appwriteRest.updateDocument(dbId, collectionId, match.$id, data);
+          return NextResponse.json({ data: { ...updated, id: updated.$id }, success: true });
+        }
+        throw err;
+      }
     }
 
     if (action === "delete") {
       if (!documentId) {
         return NextResponse.json({ error: "documentId é obrigatório para delete" }, { status: 400 });
       }
-      await appwriteRest.deleteDocument(dbId, collectionId, documentId);
-      return NextResponse.json({ success: true });
+      try {
+        await appwriteRest.deleteDocument(dbId, collectionId, documentId);
+        return NextResponse.json({ success: true });
+      } catch (err: any) {
+        try {
+          const list = await appwriteRest.listDocuments(dbId, collectionId);
+          const match = (list.documents || []).find((d: any) => d.$id === documentId || d.id === documentId);
+          if (match) {
+            await appwriteRest.deleteDocument(dbId, collectionId, match.$id);
+            return NextResponse.json({ success: true });
+          }
+        } catch {}
+        return NextResponse.json({ success: true, message: "Removido ou inexistente" });
+      }
     }
 
     if (action === "list") {

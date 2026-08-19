@@ -63,9 +63,16 @@ export function Topbar({ profile, title, onOpenChat, projects = [] }: TopbarProp
     router.refresh();
   };
 
-  const initials = profile?.full_name
-    ? profile.full_name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase()
-    : profile?.email?.[0]?.toUpperCase() ?? "?";
+  const displayName = profile?.full_name && !profile.full_name.includes("Administrador")
+    ? profile.full_name
+    : (profile?.email ? profile.email.split("@")[0] : "Marcos Camargo");
+
+  const initials = displayName
+    .split(" ")
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase();
 
   // Breadcrumb generator
   const getBreadcrumbs = () => {
@@ -162,7 +169,7 @@ export function Topbar({ profile, title, onOpenChat, projects = [] }: TopbarProp
             <DropdownMenu.Portal>
               <DropdownMenu.Content align="end" className="w-56 bg-card border border-border rounded-xl shadow-xl p-1.5 z-50 animate-in fade-in-50 zoom-in-95">
                 <div className="px-2.5 py-2 mb-1 border-b border-border/60">
-                  <p className="text-sm font-semibold text-foreground truncate">{profile?.full_name || "Usuário"}</p>
+                  <p className="text-sm font-semibold text-foreground truncate">{displayName}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{profile?.email}</p>
                   <div className="mt-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] font-medium text-muted-foreground">
                     Ministério dos Transportes

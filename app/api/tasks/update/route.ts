@@ -30,7 +30,19 @@ export async function POST(req: Request) {
       dataToUpdate.metadata = typeof updates.metadata === "object" ? JSON.stringify(updates.metadata) : String(updates.metadata);
     }
 
-    const updated = await appwriteRest.updateDocument(dbId, collectionId, taskId, dataToUpdate);
+    let updated: any;
+    try {
+      updated = await appwriteRest.updateDocument(dbId, collectionId, taskId, dataToUpdate);
+    } catch (err: any) {
+      // Fallback: busca pelo campo id no Appwrite
+      const list = await appwriteRest.listDocuments(dbId, collectionId);
+      const match = (list.documents || []).find((d: any) => d.$id === taskId || d.id === taskId);
+      if (match) {
+        updated = await appwriteRest.updateDocument(dbId, collectionId, match.$id, dataToUpdate);
+      } else {
+        throw err;
+      }
+    }
 
     return NextResponse.json({ task: { ...updated, id: updated.$id }, success: true });
   } catch (err: any) {

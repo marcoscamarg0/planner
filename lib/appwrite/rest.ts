@@ -166,14 +166,14 @@ export const appwriteRest = {
   // Documents
   async listDocuments(databaseId: string, collectionId: string, queries: string[] = []) {
     const params: Record<string, string> = {};
-    if (queries.length > 0) {
+    if (queries && queries.length > 0) {
       queries.forEach((q, idx) => {
         params[`queries[${idx}]`] = q;
       });
     }
     return appwriteFetch({
       path: `/databases/${databaseId}/collections/${collectionId}/documents`,
-      params: queries.length > 0 ? params : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
       useKey: true,
     });
   },

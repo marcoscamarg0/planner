@@ -57,6 +57,20 @@ export function ProjectEditorClient({
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Sincroniza props iniciais
+  useEffect(() => {
+    if (initialTasks && initialTasks.length > 0) {
+      setTasks(initialTasks);
+    }
+  }, [initialTasks]);
+
+  useEffect(() => {
+    if (initialPages && initialPages.length > 0) {
+      setPages(initialPages);
+      if (!selectedPage) setSelectedPage(initialPages[0]);
+    }
+  }, [initialPages]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Initialize the active tab from the URL ?tab= parameter
   const initialTab = (searchParams?.get("tab") as Tab) || "editor";
   const [tab, setTab] = useState<Tab>(["editor", "tasks", "flow", "flow_spreadsheet", "qa", "smart_runner", "batch_runner", "test_cases", "reports"].includes(initialTab) ? initialTab : "editor");

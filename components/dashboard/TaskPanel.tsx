@@ -1419,7 +1419,6 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
 
   const cycleStatus = async (task: Task) => {
     const nextStatus = STATUS_CYCLE[task.status];
-    const supabase = createClient();
 
     let metadata = task.metadata;
     if (nextStatus === "done" && metadata?.automationCode) {
@@ -1427,30 +1426,61 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
       delete metadata.automationCode;
     }
 
-    await supabase
-      .from("tasks")
-      .update({ status: nextStatus, updated_at: new Date().toISOString(), metadata })
-      .eq("id", task.id);
-
+    // 1. Atualização otimista na tela
     onTasksChange(
       tasks.map((t) => (t.id === task.id ? { ...t, status: nextStatus, metadata } : t))
     );
+
+    // 2. Salva no banco de dados via endpoint seguro
+    try {
+      await fetch("/api/tasks/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: task.id,
+          status: nextStatus,
+          metadata,
+        }),
+      });
+    } catch (err) {
+      console.warn("[TaskPanel] Falha ao atualizar tarefa:", err);
+    }
+
+    // 3. Notifica Dashboard e Projects em tempo real
+    try {
+      localStorage.setItem("planner_tasks_updated", Date.now().toString());
+      window.dispatchEvent(new Event("storage"));
+    } catch {}
   };
 
   const updatePriority = async (taskId: string, priority: TaskPriority) => {
-    const supabase = createClient();
-    await supabase.from("tasks").update({ priority }).eq("id", taskId);
     onTasksChange(
       tasks.map((t) => (t.id === taskId ? { ...t, priority } : t))
     );
+    try {
+      await fetch("/api/tasks/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, priority }),
+      });
+      localStorage.setItem("planner_tasks_updated", Date.now().toString());
+      window.dispatchEvent(new Event("storage"));
+    } catch {}
   };
 
   const updateDescription = async (taskId: string, description: string) => {
-    const supabase = createClient();
-    await supabase.from("tasks").update({ description }).eq("id", taskId);
     onTasksChange(
       tasks.map((t) => (t.id === taskId ? { ...t, description } : t))
     );
+    try {
+      await fetch("/api/tasks/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, description }),
+      });
+      localStorage.setItem("planner_tasks_updated", Date.now().toString());
+      window.dispatchEvent(new Event("storage"));
+    } catch {}
   };
 
   const deleteTask = async (taskId: string) => {
@@ -1458,12 +1488,23 @@ export function TaskPanel({ tasks, projectId, onTasksChange, projectUrl }: TaskP
     const supabase = createClient();
     await supabase.from("tasks").delete().eq("id", taskId);
     onTasksChange(tasks.filter((t) => t.id !== taskId && t.parent_task_id !== taskId));
+    try {
+      localStorage.setItem("planner_tasks_updated", Date.now().toString());
+      window.dispatchEvent(new Event("storage"));
+    } catch {}
   };
 
   const cancelTask = async (taskId: string) => {
-    const supabase = createClient();
-    await supabase.from("tasks").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", taskId);
     onTasksChange(tasks.map((t) => (t.id === taskId ? { ...t, status: "cancelled" } : t)));
+    try {
+      await fetch("/api/tasks/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, status: "cancelled" }),
+      });
+      localStorage.setItem("planner_tasks_updated", Date.now().toString());
+      window.dispatchEvent(new Event("storage"));
+    } catch {}
   };
 
   const statusFilters: (TaskStatus | "all")[] = [
