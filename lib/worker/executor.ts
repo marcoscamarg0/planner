@@ -266,14 +266,10 @@ async function executeStep(
 
 
 
-export async function executeAutomation(
-  job: Job<AutomationJobData>
-): Promise<AutomationJobResult> {
-  const { targetUrl, scriptSteps, jobId, jobName } = job.data;
-  const results: StepResult[] = [];
-  let axeViolations: any[] = [];
+import { execSync } from 'child_process';
 
-  const browser = await chromium.launch({
+async function launchWorkerBrowserSafely() {
+  const launchOptions = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -282,7 +278,34 @@ export async function executeAutomation(
       '--disable-gpu',
       '--disable-extensions',
     ],
-  });
+  };
+
+  try {
+    return await chromium.launch(launchOptions);
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes("doesn't exist") || msg.includes("Please run the following command")) {
+      console.log('[Worker] Binário do Chromium não encontrado. Tentando auto-instalar...');
+      try {
+        execSync('npx playwright install chromium', { stdio: 'inherit' });
+        return await chromium.launch(launchOptions);
+      } catch (installErr) {
+        console.error('[Worker] Falha ao instalar Chromium em runtime:', installErr);
+        throw err;
+      }
+    }
+    throw err;
+  }
+}
+
+export async function executeAutomation(
+  job: Job<AutomationJobData>
+): Promise<AutomationJobResult> {
+  const { targetUrl, scriptSteps, jobId, jobName } = job.data;
+  const results: StepResult[] = [];
+  let axeViolations: any[] = [];
+
+  const browser = await launchWorkerBrowserSafely();
 
   try {
     const context = await browser.newContext({

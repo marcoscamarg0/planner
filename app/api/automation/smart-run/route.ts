@@ -8,11 +8,47 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 
+import { execSync } from 'child_process';
+
 export const runtime = 'nodejs';
 
 async function getChromium() {
   const pw = await import('@playwright/test');
   return pw.chromium;
+}
+
+async function launchBrowserSafely(chromium: any) {
+  const launchOptions = {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-blink-features=AutomationControlled',
+      '--ignore-certificate-errors',
+      '--ignore-ssl-errors',
+      '--font-render-hinting=medium',
+      '--enable-font-antialiasing',
+    ],
+  };
+
+  try {
+    return await chromium.launch(launchOptions);
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes("doesn't exist") || msg.includes("Please run the following command")) {
+      console.log('[Playwright] Binário do Chromium não encontrado. Executando auto-instalação...');
+      try {
+        execSync('npx playwright install chromium', { stdio: 'inherit' });
+        return await chromium.launch(launchOptions);
+      } catch (installErr) {
+        console.error('[Playwright] Falha ao instalar Chromium em runtime:', installErr);
+        throw err;
+      }
+    }
+    throw err;
+  }
 }
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -970,19 +1006,7 @@ export async function POST(req: Request) {
       }
 
       const chromium = await getChromium();
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-          '--ignore-certificate-errors',
-          '--ignore-ssl-errors',
-          '--font-render-hinting=medium',
-          '--enable-font-antialiasing',
-        ],
-      });
+      browser = await launchBrowserSafely(chromium);
 
       const context = await browser.newContext({
         locale: 'pt-BR',
