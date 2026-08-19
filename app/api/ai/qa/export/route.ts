@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     }
 
     // Criar as tarefas no projeto
-    const tasksToInsert = reports.map(report => ({
+    const tasksToInsert = ((reports as any[]) || []).map((report: any) => ({
       project_id: projectId,
       title: `[QA] ${report.title}`,
       description: `**Relatório de Automação QA**\n\n**Tipo:** ${report.type}\n**Descrição original:** ${report.input_description}\n**Criado em:** ${new Date(report.created_at).toLocaleString('pt-BR')}\n\n**Link para o relatório (PDF/HTML):**\n${report.result_raw ? JSON.parse(report.result_raw).htmlReportUrl || '' : ''}`,

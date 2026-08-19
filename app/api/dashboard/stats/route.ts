@@ -21,7 +21,7 @@ export async function GET() {
       .order("updated_at", { ascending: false });
 
     const userProjects = (rawProjects as Project[]) ?? [];
-    const projectIds = userProjects.map((p) => p.id);
+    const projectIds = userProjects.map((p: Project) => p.id);
 
     // Busca tarefas, páginas, insights e contagem de QA
     let [
@@ -57,16 +57,16 @@ export async function GET() {
     const userPages = rawPages ?? [];
     const userInsights = rawInsights ?? [];
 
-    const projectsWithStats: ProjectWithStats[] = userProjects.map((project) => {
-      const subprojectIds = userProjects.filter((p) => p.parent_id === project.id).map((p) => p.id);
+    const projectsWithStats: ProjectWithStats[] = userProjects.map((project: Project) => {
+      const subprojectIds = userProjects.filter((p: Project) => p.parent_id === project.id).map((p: Project) => p.id);
       const allIds = [project.id, ...subprojectIds];
 
-      const projectTasks = userTasks.filter((t) => allIds.includes(t.project_id) && t.status !== "cancelled");
+      const projectTasks = userTasks.filter((t: Task) => allIds.includes(t.project_id) && t.status !== "cancelled");
       const projectPages = (userPages as any[]).filter((p: any) => allIds.includes(p.project_id));
       const lastInsight = (userInsights as any[]).find((i: any) => i.project_id === project.id) as AiInsight | undefined;
 
       const total = projectTasks.length;
-      const completed = projectTasks.filter((t) => t.status === "done").length;
+      const completed = projectTasks.filter((t: Task) => t.status === "done").length;
 
       return {
         ...project,
@@ -77,14 +77,14 @@ export async function GET() {
       };
     });
 
-    const activeTasks = userTasks.filter((t) => t.status !== "cancelled" && t.title?.trim() !== "");
+    const activeTasks = userTasks.filter((t: Task) => t.status !== "cancelled" && t.title?.trim() !== "");
     const totalTasks = activeTasks.length;
-    const completedTasks = activeTasks.filter((t) => t.status === "done").length;
-    const pendingTasks = activeTasks.filter((t) => t.status !== "done").length;
+    const completedTasks = activeTasks.filter((t: Task) => t.status === "done").length;
+    const pendingTasks = activeTasks.filter((t: Task) => t.status !== "done").length;
 
     const stats = {
       total_projects: userProjects.length,
-      active_projects: userProjects.filter((p) => p.status === "active").length,
+      active_projects: userProjects.filter((p: Project) => p.status === "active").length,
       total_tasks: totalTasks,
       completed_tasks: completedTasks,
       pending_tasks: pendingTasks,

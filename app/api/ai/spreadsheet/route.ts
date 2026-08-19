@@ -96,14 +96,14 @@ export async function POST(req: Request) {
     }
 
     // 3. Build data context for AI
-    const projectSummaries = projects.map((p, index) => {
-      const pReports = (reports || []).filter(r => r.project_id === p.id);
+    const projectSummaries = ((projects as any[]) || []).map((p: any, index: number) => {
+      const pReports = ((reports as any[]) || []).filter((r: any) => r.project_id === p.id);
       let contextStr = `PROJETO ${index + 1}: ${p.title}\nID_INTERNO: ${p.id}\nDESCRIÇÃO: ${p.description || "N/A"}\n`;
       
       if (pReports.length > 0) {
         contextStr += `RESULTADOS DOS TESTES (QA):\n`;
         // Limit to top 3 reports to avoid context limit
-        pReports.slice(0, 3).forEach((r, i) => {
+        pReports.slice(0, 3).forEach((r: any, i: number) => {
           contextStr += `--- RELATÓRIO ${i+1} (${r.type} - ${r.title}) ---\n`;
           contextStr += `${(r.result_raw || "").substring(0, 1500)}\n`;
         });

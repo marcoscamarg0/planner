@@ -65,7 +65,7 @@ export default async function DashboardPage() {
     updated_at: new Date().toISOString(),
   };
 
-  const projectIds = userProjects.map((p) => p.id);
+  const projectIds = userProjects.map((p: Project) => p.id);
 
   // Busca tarefas, páginas e insights
   let [
@@ -109,30 +109,30 @@ export default async function DashboardPage() {
     } catch {}
   }
 
-  const projectsWithStats: ProjectWithStats[] = userProjects.map((project) => {
-    const subprojectIds = userProjects.filter((p) => p.parent_id === project.id).map((p) => p.id);
+  const projectsWithStats: ProjectWithStats[] = userProjects.map((project: Project) => {
+    const subprojectIds = userProjects.filter((p: Project) => p.parent_id === project.id).map((p: Project) => p.id);
     const allIds = [project.id, ...subprojectIds];
 
-    const projectTasks = userTasks.filter((t) => allIds.includes(t.project_id) && t.status !== "cancelled");
-    const projectPages = userPages.filter((p: any) => allIds.includes(p.project_id));
-    const lastInsight = userInsights.find((i: any) => i.project_id === project.id) as AiInsight | undefined;
+    const projectTasks = userTasks.filter((t: Task) => allIds.includes(t.project_id) && t.status !== "cancelled");
+    const projectPages = (userPages as any[]).filter((p: any) => allIds.includes(p.project_id));
+    const lastInsight = (userInsights as any[]).find((i: any) => i.project_id === project.id) as AiInsight | undefined;
 
     return {
       ...project,
       total_tasks: projectTasks.length,
-      completed_tasks: projectTasks.filter((t) => t.status === "done").length,
+      completed_tasks: projectTasks.filter((t: Task) => t.status === "done").length,
       pages_count: projectPages.length,
       last_insight: lastInsight ?? undefined,
     };
   });
 
-  const parentTasks = userTasks.filter((t) => !t.parent_task_id && t.status !== "cancelled" && t.title?.trim() !== "");
-  const totalTasks = parentTasks.length > 0 ? parentTasks.length : userTasks.filter(t => t.status !== "cancelled").length;
-  const completedTasks = userTasks.filter((t) => t.status === "done").length;
+  const parentTasks = userTasks.filter((t: Task) => !t.parent_task_id && t.status !== "cancelled" && t.title?.trim() !== "");
+  const totalTasks = parentTasks.length > 0 ? parentTasks.length : userTasks.filter((t: Task) => t.status !== "cancelled").length;
+  const completedTasks = userTasks.filter((t: Task) => t.status === "done").length;
 
   const stats = {
     total_projects: userProjects.length,
-    active_projects: userProjects.filter((p) => p.status === "active").length,
+    active_projects: userProjects.filter((p: Project) => p.status === "active").length,
     total_tasks: totalTasks,
     completed_tasks: completedTasks,
     completion_rate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,

@@ -94,8 +94,8 @@ export default async function ProjectPage({ params }: Props) {
 
   // Se for projeto pai (agrupador) com subprojetos, renderiza a visão de container
   if (!project.parent_id && subProjects.length > 0) {
-    const subIds = subProjects.map((s) => s.id);
-    let subProjectsWithStats = subProjects.map((s) => ({
+    const subIds = subProjects.map((s: any) => s.id);
+    let subProjectsWithStats = subProjects.map((s: any) => ({
       ...s,
       total_tasks: 0,
       completed_tasks: 0,
@@ -109,12 +109,12 @@ export default async function ProjectPage({ params }: Props) {
         .in("project_id", subIds);
 
       if (subTasks && subTasks.length > 0) {
-        subProjectsWithStats = subProjectsWithStats.map((s) => {
-          const sTasks = subTasks.filter((t) => t.project_id === s.id && t.status !== "cancelled");
+        subProjectsWithStats = subProjectsWithStats.map((s: any) => {
+          const sTasks = (subTasks as any[]).filter((t: any) => t.project_id === s.id && t.status !== "cancelled");
           return {
             ...s,
             total_tasks: sTasks.length,
-            completed_tasks: sTasks.filter((t) => t.status === "done").length,
+            completed_tasks: sTasks.filter((t: any) => t.status === "done").length,
             pages_count: 0,
           };
         });

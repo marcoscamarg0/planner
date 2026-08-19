@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     // Insert Tasks
     if (tasks && Array.isArray(tasks) && tasks.length > 0) {
-      const tasksToInsert = tasks.map(t => ({
+      const tasksToInsert = (tasks as any[]).map((t: any) => ({
         project_id: projectId,
         page_id: newPageId, // link to the note if we created one
         title: t.title || "Nova demanda governamental",

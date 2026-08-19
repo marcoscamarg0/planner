@@ -24,15 +24,17 @@ export async function POST(req: Request) {
     const model = process.env.OPENROUTER_MODEL_CHAT || "openrouter/free";
 
     // Pega contexto opcional se tiver referências
-    const { data: references } = await supabase
+    const { data: rawReferences } = await supabase
       .from("knowledge_sources")
       .select("title, type, content")
       .eq("owner_id", user.id)
       .limit(10);
     
+    const references = (rawReferences as any[]) || [];
+    
     const contextText = references && references.length > 0 
       ? "\n\n--- SUAS REFERÊNCIAS DE CONTEXTO ---\n" + 
-        references.map(r => `[${r.type}] ${r.title}\n${(r.content || "").slice(0, 1000)}`).join("\n\n") + 
+        references.map((r: any) => `[${r.type}] ${r.title}\n${(r.content || "").slice(0, 1000)}`).join("\n\n") + 
         "\n----------------------------------"
       : "";
 

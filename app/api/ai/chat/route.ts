@@ -294,7 +294,7 @@ export async function POST(req: Request) {
         pages: pages ?? [],
         qa_reports: qaReports ?? [],
         auto_web_reports: autoWebReports ?? [],
-        reference_sources: (references ?? []).map((r) => ({
+        reference_sources: ((references as any[]) ?? []).map((r: any) => ({
           title: r.title,
           type: r.type,
           source_url: r.source_url,

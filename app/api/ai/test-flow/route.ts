@@ -54,8 +54,8 @@ function robustJsonParse(text: string) {
 /** Build a minimal React Flow graph from plain text steps (fallback when AI fails) */
 function buildFallbackFlow(text: string): { nodes: any[]; edges: any[] } {
   const lines = text.split('\n')
-    .map(l => l.replace(/^[\s\-\d\.\*]+/, '').trim())
-    .filter(l => l.length > 8)
+    .map((l: string) => l.replace(/^[\s\-\d\.\*]+/, '').trim())
+    .filter((l: string) => l.length > 8)
     .slice(0, 15);
 
   const nodes: any[] = [];

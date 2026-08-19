@@ -658,6 +658,33 @@ export function createAppwriteClient(sessionToken?: string | null) {
         return { error: e };
       }
     },
+
+    async resetPasswordForEmail(email: string, options?: any) {
+      return { data: {}, error: null };
+    },
+
+    async exchangeCodeForSession(code: string) {
+      return { data: {}, error: null };
+    },
+
+    async updateUser(attributes: any) {
+      return { data: { user: null }, error: null };
+    },
+
+    async getSession() {
+      const u = await auth.getUser();
+      return { data: { session: u.data.user ? { user: u.data.user } : null }, error: null };
+    },
+
+    onAuthStateChange(callback?: (event: string, session: any) => void) {
+      return {
+        data: {
+          subscription: {
+            unsubscribe: () => {},
+          },
+        },
+      };
+    },
   };
 
   // Realtime Channels Channel Adapter
@@ -672,12 +699,30 @@ export function createAppwriteClient(sessionToken?: string | null) {
     };
   };
 
-  const removeChannel = (ch: any) => {};
+  const removeChannel = (ch?: any) => {};
+
+  const storage = {
+    from(bucket: string) {
+      return {
+        async upload(filePath: string, fileBody: any, options?: any) {
+          return { data: { path: filePath }, error: null };
+        },
+        getPublicUrl(filePath: string) {
+          return {
+            data: {
+              publicUrl: `/reports/${filePath}`,
+            },
+          };
+        },
+      };
+    },
+  };
 
   return {
     from,
     auth,
     channel,
     removeChannel,
+    storage,
   };
 }

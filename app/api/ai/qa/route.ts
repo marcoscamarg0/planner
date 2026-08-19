@@ -635,7 +635,7 @@ Retorne APENAS um JSON válido no formato:
           .order("created_at", { ascending: false })
           .limit(50);
 
-        const reportsSummary = (allReports || []).map(r => ({
+        const reportsSummary = ((allReports as any[]) || []).map((r: any) => ({
           tipo: r.type,
           titulo: r.title,
           data: new Date(r.created_at).toLocaleDateString("pt-BR"),

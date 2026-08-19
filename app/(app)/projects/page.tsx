@@ -39,7 +39,7 @@ export default async function ProjectsPage() {
     } catch {}
   }
 
-  const projectIds = userProjects.map((p) => p.id);
+  const projectIds = userProjects.map((p: Project) => p.id);
 
   let [
     { data: tasks },
@@ -54,8 +54,8 @@ export default async function ProjectsPage() {
     : [{ data: [] }, { data: [] }, { data: [] }];
 
   let userTasks = (tasks as Task[]) ?? [];
-  let userPages = pages ?? [];
-  let userInsights = insights ?? [];
+  let userPages = (pages as any[]) ?? [];
+  let userInsights = (insights as any[]) ?? [];
 
   // Fallback de Service Role para tarefas
   if (userTasks.length === 0 && projectIds.length > 0 && process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -71,12 +71,12 @@ export default async function ProjectsPage() {
     } catch {}
   }
 
-  const projectsWithStats: ProjectWithStats[] = userProjects.map((project) => {
-    const subprojectIds = userProjects.filter((p) => p.parent_id === project.id).map((p) => p.id);
+  const projectsWithStats: ProjectWithStats[] = userProjects.map((project: Project) => {
+    const subprojectIds = userProjects.filter((p: Project) => p.parent_id === project.id).map((p: Project) => p.id);
     const allIds = [project.id, ...subprojectIds];
 
     const projectTasks = userTasks.filter(
-      (t) => allIds.includes(t.project_id) && t.status !== "cancelled" && t.title?.trim() !== ""
+      (t: Task) => allIds.includes(t.project_id) && t.status !== "cancelled" && t.title?.trim() !== ""
     );
     const projectPages = (userPages as any[]).filter((p: any) => allIds.includes(p.project_id));
     const lastInsight = (userInsights as any[]).find((i: any) => i.project_id === project.id) as AiInsight | undefined;
@@ -84,7 +84,7 @@ export default async function ProjectsPage() {
     return {
       ...project,
       total_tasks: projectTasks.length,
-      completed_tasks: projectTasks.filter((t) => t.status === "done").length,
+      completed_tasks: projectTasks.filter((t: Task) => t.status === "done").length,
       pages_count: projectPages.length,
       last_insight: lastInsight ?? undefined,
     };

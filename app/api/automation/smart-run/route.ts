@@ -1120,15 +1120,15 @@ export async function POST(req: Request) {
 
       await context.close();
 
-      const approved   = stepResults.filter(r => r.status === 'aprovado').length;
-      const failed     = stepResults.filter(r => r.status !== 'aprovado').length;
+      const approved   = stepResults.filter((r: any) => r.status === 'aprovado').length;
+      const failed     = stepResults.filter((r: any) => r.status !== 'aprovado').length;
       await logToStream('[SmartRun] Gerando relatorios HTML e PDF...');
       const htmlContent = buildReportHtml({ 
         results: stepResults, 
         axeViolations, 
         targetUrl, 
         jobName: displayName,
-        plannedSteps: steps.map(s => s.label)
+        plannedSteps: steps.map((s: any) => s.label)
       });
 
       const htmlFilename = 'smart-' + runId + '.html';
@@ -1178,7 +1178,7 @@ export async function POST(req: Request) {
         failedSteps: failed,
         axeViolationsCount: axeViolations.length,
         steps: stepResults,
-        generatedStepsCode: steps.map(s => s.label),
+        generatedStepsCode: steps.map((s: any) => s.label),
         rawSteps: steps,
         pdfUrl,
         htmlReportUrl,
@@ -1190,7 +1190,7 @@ export async function POST(req: Request) {
         ...resultJsonData,
         // Mantém a finalScreenshot e os screenshots de steps para auditoria
         finalScreenshot: resultJsonData.finalScreenshot,
-        steps: (resultJsonData.steps || []).map(s => ({
+        steps: (resultJsonData.steps || []).map((s: any) => ({
           index: s.index,
           label: s.label,
           status: s.status,

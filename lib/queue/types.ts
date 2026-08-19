@@ -45,8 +45,10 @@ export interface StepResult {
   status: 'aprovado' | 'falha_clique' | 'erro_js' | 'sem_texto' | 'pulado';
   detalhe: string;
   screenshotBase64?: string;
+  screenshotBeforeBase64?: string;
   screenshotElementBase64?: string;
   duration?: number;          // ms
+  [key: string]: any;
 }
 
 export interface AutomationJobResult {
