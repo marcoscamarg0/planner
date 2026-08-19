@@ -333,11 +333,8 @@ export async function executeAutomation(
     await job.updateProgress(90);
     const htmlContent = buildReportHtml({ results, axeViolations, targetUrl, jobName });
 
-    // Import do Supabase no topo ou no escopo
-    const { createClient } = require('@supabase/supabase-js');
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { createAppwriteClient } = require('../appwrite/adapter');
+    const supabase = createAppwriteClient();
 
     const htmlFilename = `report-${jobId}.html`;
     let htmlReportUrl = '';

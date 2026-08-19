@@ -8,11 +8,9 @@ import { Worker, type Job } from 'bullmq';
 import { getConnection } from '../queue/queue';
 import type { AutomationJobData } from '../queue/types';
 import { executeAutomation } from './executor';
-import { createClient } from '@supabase/supabase-js';
+import { createAppwriteClient } from '../appwrite/adapter';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createAppwriteClient();
 
 console.log('[Worker] 🚀 Iniciando BullMQ Worker de Automação...');
 console.log('[Worker] Redis URL:', process.env.REDIS_URL ? '✅ Configurado' : '⚠️ Usando localhost');
