@@ -25,7 +25,7 @@ export default async function CalendarPage({
     .not("due_date", "is", null)
     .order("due_date", { ascending: true });
 
-  const tasksList = tasks || [];
+  const tasksList: any[] = (tasks as any[]) || [];
 
   // Calendar logic
   const monthStart = startOfMonth(targetDate);
@@ -84,8 +84,8 @@ export default async function CalendarPage({
 
         {/* Calendar Grid */}
         <div className="grid grid-cols-7 gap-2 md:gap-4">
-          {days.map((day, i) => {
-            const dayTasks = tasksList.filter(t => t.due_date && isSameDay(parseISO(t.due_date), day));
+          {days.map((day) => {
+            const dayTasks = tasksList.filter((t: any) => t.due_date && isSameDay(parseISO(t.due_date), day));
             const isCurrentMonth = format(day, 'M') === format(monthStart, 'M');
             
             return (
@@ -105,7 +105,7 @@ export default async function CalendarPage({
                 </div>
                 
                 <div className="space-y-1.5 overflow-y-auto max-h-[80px] custom-scrollbar">
-                  {dayTasks.map(task => {
+                  {dayTasks.map((task: any) => {
                     const proj = getProjectInfo(task.projects);
                     return (
                       <div 
@@ -135,7 +135,7 @@ export default async function CalendarPage({
           Próximos Prazos (Visão em Lista)
         </h3>
         <div className="glass rounded-xl divide-y divide-border/50">
-          {tasksList.filter(t => t.due_date && new Date(t.due_date) >= new Date()).slice(0, 10).map(task => {
+          {tasksList.filter((t: any) => t.due_date && new Date(t.due_date) >= new Date()).slice(0, 10).map((task: any) => {
             const proj = getProjectInfo(task.projects);
             return (
               <div key={task.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
@@ -160,7 +160,7 @@ export default async function CalendarPage({
             );
           })}
           
-          {tasksList.filter(t => new Date(t.due_date) >= new Date()).length === 0 && (
+          {tasksList.filter((t: any) => t.due_date && new Date(t.due_date) >= new Date()).length === 0 && (
             <div className="p-8 text-center text-muted-foreground text-sm">
               Nenhum prazo futuro encontrado. Adicione datas nas suas demandas.
             </div>

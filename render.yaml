@@ -4,7 +4,7 @@ services:
     name: planner-web
     runtime: node
     plan: starter
-    buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
+    buildCommand: npm install && npx playwright install chromium && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
@@ -30,7 +30,7 @@ services:
     plan: starter
     buildCommand: >
       npm install &&
-      npx playwright install chromium --with-deps &&
+      npx playwright install chromium &&
       npx tsc --project tsconfig.worker.json
     startCommand: node dist/lib/worker/worker.js
     envVars:
