@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { ProjectsClient } from "./ProjectsClient";
 import type { Project, Task, ProjectWithStats, AiInsight } from "@/types";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Projetos | Planner",
   description: "Gerencie seus projetos e entregas institucionais",

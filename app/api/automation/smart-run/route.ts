@@ -984,11 +984,12 @@ export async function POST(req: Request) {
         broken_links: 'Links Quebrados'
       };
       const displayName = jobName || `Auditoria ${typeLabelMap[testType] || testType}: ` + new URL(targetUrl).hostname;
-      let reportId: string | null = null;
+      const projectIdFromReq = body.project_id || body.projectId || null;
 
       try {
         const { data: insertedReport, error } = await supabase.from('qa_reports').insert({
           user_id: user.id,
+          project_id: projectIdFromReq,
           type: 'smart_runner',
           title: 'Auditoria IA (Rodando): ' + displayName,
           input_description: (testType === 'smart_ai' ? 'Fluxo testado em ' + targetUrl + ':\n' + flowDescription : `Teste Automático (${typeLabelMap[testType]}) em ${targetUrl}`),

@@ -45,20 +45,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true });
       } catch (err: any) {
         try {
-          const list = await appwriteRest.listDocuments(dbId, collectionId);
-          const match = (list.documents || []).find((d: any) => d.$id === documentId || d.id === documentId);
-          if (match) {
-            await appwriteRest.deleteDocument(dbId, collectionId, match.$id);
-            return NextResponse.json({ success: true });
+          const list = await appwriteRest.fetchAllDocuments(dbId, collectionId);
+          const matches = (list || []).filter((d: any) => d.$id === documentId || d.id === documentId);
+          for (const m of matches) {
+            await appwriteRest.deleteDocument(dbId, collectionId, m.$id).catch(() => {});
           }
+          return NextResponse.json({ success: true });
         } catch {}
         return NextResponse.json({ success: true, message: "Removido ou inexistente" });
       }
     }
 
     if (action === "list") {
-      const list = await appwriteRest.listDocuments(dbId, collectionId, queries || []);
-      return NextResponse.json({ data: list.documents || [], total: list.total || 0, success: true });
+      const list = await appwriteRest.fetchAllDocuments(dbId, collectionId);
+      return NextResponse.json({ data: list, total: list.length, success: true });
     }
 
     return NextResponse.json({ error: "Ação inválida" }, { status: 400 });

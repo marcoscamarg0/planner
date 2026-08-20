@@ -97,7 +97,7 @@ function StepBadge({ status }: { status: StepResult["status"] }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Componente principal
 // ──────────────────────────────────────────────────────────────────────────────
-export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { initialReport?: RunResult | null, onImportPdf?: (url: string) => void, defaultUrl?: string }) {
+export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl, projectId }: { initialReport?: RunResult | null, onImportPdf?: (url: string) => void, defaultUrl?: string, projectId?: string }) {
   const [testType, setTestType]           = useState("smart_ai");
   const [targetUrl, setTargetUrl]         = useState(defaultUrl || "");
   const [flowDescription, setFlowDescription] = useState("");
@@ -230,6 +230,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const currentModel = MODELS.find(m => m.key === model) || MODELS[0];
 
   const startTimer = () => {
@@ -238,6 +239,17 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
   };
   const stopTimer = () => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  };
+
+  const handleCancelRun = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLogs(l => [...l, "[SmartRun] 🛑 Execução cancelada pelo usuário."]);
+    setErrorMsg("Execução do SmartRunner cancelada pelo usuário.");
+    setPhase("error");
+    stopTimer();
   };
 
   const PHASE_MESSAGES = [
@@ -327,6 +339,9 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
     setLogs([]);
     startTimer();
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     let msgIdx = 0;
     setCurrentPhaseMsg(PHASE_MESSAGES[0]);
     const msgInterval = setInterval(() => {
@@ -338,7 +353,12 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
       const res = await fetch("/api/automation/smart-run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          projectId: payload.projectId || projectId || null,
+          project_id: payload.project_id || projectId || null,
+        }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -352,6 +372,7 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
 
       let buffer = "";
       while (true) {
+        if (controller.signal.aborted) break;
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -384,10 +405,15 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
       }
 
     } catch (e: any) {
-      console.error(e);
-      setErrorMsg(e.message || "Erro inesperado.");
+      if (e.name === 'AbortError' || controller.signal.aborted) {
+        setErrorMsg("Execução do SmartRunner cancelada pelo usuário.");
+      } else {
+        console.error(e);
+        setErrorMsg(e.message || "Erro inesperado.");
+      }
       setPhase("error");
     } finally {
+      abortControllerRef.current = null;
       clearInterval(msgInterval);
       stopTimer();
     }
@@ -715,6 +741,18 @@ export function SmartRunnerTab({ initialReport, onImportPdf, defaultUrl }: { ini
                   {log}
                 </div>
               ))}
+            </div>
+
+            {/* Botão de Cancelamento Imediato */}
+            <div className="flex items-center justify-center pt-2">
+              <button
+                type="button"
+                onClick={handleCancelRun}
+                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-sm font-bold shadow-lg shadow-rose-500/10 transition-all hover:scale-105 active:scale-95"
+              >
+                <X className="w-4 h-4" />
+                <span>Cancelar SmartRunner</span>
+              </button>
             </div>
           </motion.div>
         )}

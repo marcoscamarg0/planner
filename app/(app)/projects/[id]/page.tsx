@@ -6,6 +6,7 @@ import { ParentProjectClient } from "./ParentProjectClient";
 import type { Task, Project, Page, AiInsight } from "@/types";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 interface Props {
   params: Promise<{ id: string }>;

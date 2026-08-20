@@ -409,10 +409,10 @@ export function createAppwriteClient(sessionToken?: string | null) {
                 try {
                   await appwriteRest.deleteDocument(dbId, state.table, idFilter.value);
                 } catch {
-                  const list = await appwriteRest.listDocuments(dbId, state.table);
-                  const match = (list.documents || []).find((d: any) => d.$id === idFilter.value || d.id === idFilter.value);
-                  if (match) {
-                    await appwriteRest.deleteDocument(dbId, state.table, match.$id);
+                  const list = await appwriteRest.fetchAllDocuments(dbId, state.table);
+                  const matches = (list || []).filter((d: any) => d.$id === idFilter.value || d.id === idFilter.value);
+                  for (const m of matches) {
+                    await appwriteRest.deleteDocument(dbId, state.table, m.$id).catch(() => {});
                   }
                 }
               }
@@ -421,7 +421,7 @@ export function createAppwriteClient(sessionToken?: string | null) {
 
             const list = typeof window !== "undefined"
               ? await (await callMutationProxy({ action: "list", table: state.table })).data
-              : (await appwriteRest.listDocuments(dbId, state.table)).documents || [];
+              : await appwriteRest.fetchAllDocuments(dbId, state.table);
 
             let docs: any[] = Array.isArray(list) ? list : [];
             for (const f of deleteFilters) {
@@ -474,7 +474,7 @@ export function createAppwriteClient(sessionToken?: string | null) {
       then(resolve: any, reject?: any) {
         const fetchDocs = typeof window !== "undefined"
           ? callMutationProxy({ action: "list", table: state.table }).then((r) => ({ documents: r.data }))
-          : appwriteRest.listDocuments(dbId, state.table);
+          : appwriteRest.fetchAllDocuments(dbId, state.table).then((docs) => ({ documents: docs }));
 
         fetchDocs
           .then(async (res: any) => {

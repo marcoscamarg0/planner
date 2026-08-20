@@ -42,8 +42,21 @@ export function ProjectCard({ project, subProjects = [], index = 0, currentUserI
 
   const handleDelete = async () => {
     if (window.confirm(`Tem certeza que deseja apagar o projeto "${project.title}"? Todas as tarefas e páginas serão perdidas.`)) {
-      await supabase.from("projects").delete().eq("id", project.id);
-      router.refresh();
+      try {
+        const res = await fetch("/api/projects/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: project.id }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Erro ao excluir projeto");
+        }
+        router.refresh();
+      } catch (err: any) {
+        console.error("Erro ao apagar projeto:", err);
+        alert(`Erro ao apagar projeto: ${err.message}`);
+      }
     }
   };
 

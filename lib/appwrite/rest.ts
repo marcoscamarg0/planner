@@ -1,4 +1,5 @@
 import { appwriteConfig } from "./config";
+export { appwriteConfig };
 
 interface AppwriteRequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -176,6 +177,44 @@ export const appwriteRest = {
       params: Object.keys(params).length > 0 ? params : undefined,
       useKey: true,
     });
+  },
+
+  async fetchAllDocuments(databaseId: string, collectionId: string): Promise<any[]> {
+    let all: any[] = [];
+    let offset = 0;
+    const limit = 100;
+
+    for (let page = 0; page < 20; page++) {
+      try {
+        const params: Record<string, string> = {
+          "queries[0]": `limit(${limit})`,
+          "queries[1]": `offset(${offset})`,
+        };
+        const res = await appwriteFetch({
+          path: `/databases/${databaseId}/collections/${collectionId}/documents`,
+          params,
+          useKey: true,
+        });
+        const docs = res?.documents || [];
+        all = all.concat(docs);
+        if (docs.length < limit || (res.total && all.length >= res.total)) {
+          break;
+        }
+        offset += limit;
+      } catch (err) {
+        if (all.length === 0) {
+          try {
+            const fallback = await appwriteFetch({
+              path: `/databases/${databaseId}/collections/${collectionId}/documents`,
+              useKey: true,
+            });
+            return fallback?.documents || [];
+          } catch {}
+        }
+        break;
+      }
+    }
+    return all;
   },
 
   async createDocument(databaseId: string, collectionId: string, documentId: string, data: any) {

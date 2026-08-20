@@ -57,6 +57,7 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { SmartRunnerTab } from "@/components/qa/SmartRunnerTab";
 import { BatchRunnerTab } from "@/components/qa/BatchRunnerTab";
+import { MultiSubprojectRunnerModal } from "@/components/qa/MultiSubprojectRunnerModal";
 import { QaLiveConsole, type LogEntry } from "@/components/qa/QaLiveConsole";
 
 const MODELS = [
@@ -274,6 +275,7 @@ export function QaClient({ projectId, externalTab, projectUrl, onGoToTasks }: Qa
   const [copied, setCopied] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [autoIndexTasks, setAutoIndexTasks] = useState(true);
+  const [multiSubModalOpen, setMultiSubModalOpen] = useState(false);
 
   const addLog = useCallback((level: "info" | "success" | "warn" | "error" | "ai", message: string) => {
     setConsoleLogs((prev) => [
@@ -2206,6 +2208,20 @@ export function QaClient({ projectId, externalTab, projectUrl, onGoToTasks }: Qa
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Multi-Subprojects Batch Runner Button */}
+            <button
+              onClick={() => {
+                fetchProjects();
+                setMultiSubModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all shadow-md shadow-primary/20"
+              title="Executar geração de casos e testes automatizados para múltiplos subprojetos sem sair da tela"
+            >
+              <Zap className="w-4 h-4" />
+              <span className="hidden sm:inline">Subprojetos em Massa</span>
+              <span className="sm:hidden">Em Massa</span>
+            </button>
+
             {/* Consolidated Report Button */}
             <button
               onClick={handleConsolidatedReport}
@@ -4314,6 +4330,12 @@ export function QaClient({ projectId, externalTab, projectUrl, onGoToTasks }: Qa
         )}
       </AnimatePresence>
 
+      <MultiSubprojectRunnerModal
+        open={multiSubModalOpen}
+        onClose={() => setMultiSubModalOpen(false)}
+        subProjects={projects as any}
+        onFinished={() => loadReports()}
+      />
     </div>
   );
 }
